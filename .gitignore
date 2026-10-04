@@ -1,0 +1,35 @@
+# Unity generated
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+
+# Memory captured by Unity profiler for [Scripts] inspection 
+(Mono|Unity)ProfilerData.*
+
+# Generated .cache and .idea folders
+.idea/
+.vs/
+.vscode/
+*.csproj
+*.sln
+*.suo
+*.tmp
+*.unityproj
+*.meta
+
+# Automatic Unity plugin editor assets
+*.monoscript
+*.unitypackage
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Synaptic
+.synaptic/
+.codex-backups/
+.claude/
