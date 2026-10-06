@@ -2,7 +2,7 @@ using UnityEngine;
 
 /// <summary>A physical round bumper that awards two WIN on a new ball contact.</summary>
 [DisallowMultipleComponent]
-[RequireComponent(typeof(SphereCollider))]
+[RequireComponent(typeof(Collider))]
 public sealed class MedalLotteryBumper : MonoBehaviour
 {
     public MedalBallLotteryStation station;

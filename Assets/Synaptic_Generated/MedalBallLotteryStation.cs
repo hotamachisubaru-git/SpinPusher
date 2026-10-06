@@ -21,8 +21,11 @@ public sealed class MedalBallLotteryStation : MonoBehaviour
     public TMP_Text upperWinText;
     [Min(.1f)] public float upperMinimumHorizontalSpeed = 1.35f;
     [Min(0f)] public float upperSpeedMaintenanceAcceleration = 1.7f;
+    [Tooltip("Speed used to distinguish stopped balls from confined collision motion in recovery diagnostics.")]
     [Min(.01f)] public float upperStallSpeed = .22f;
+    [Tooltip("Seconds allowed without moving beyond the progress anchor before the same ball is relaunched.")]
     [Min(.1f)] public float upperStallDuration = 1.35f;
+    [Tooltip("Horizontal world distance from the progress anchor that starts a fresh motion window.")]
     [Min(.01f)] public float upperStallDisplacement = .12f;
     public Transform colorLaunchPoint;
     public MedalColorRoutePocket[] colorRoutePockets;
@@ -108,8 +111,10 @@ public sealed class MedalBallLotteryStation : MonoBehaviour
     public string LastRecoveryBallInstanceId { get; private set; } = "";
     public int LastRecoveryUsedOutBlockCount { get; private set; }
     public bool LastRecoveryColorGatesOpen { get; private set; }
+    public float LastRecoveryHorizontalSpeed { get; private set; }
     public float UpperStagnantSeconds => upperStalledAt >= 0f ? Mathf.Max(0f, Time.time - upperStalledAt) : 0f;
     public float UpperHorizontalSpeed => ballBody != null ? Horizontal(ballBody.linearVelocity).magnitude : 0f;
+    public float UpperProgressExcursion => ballBody != null ? Horizontal(ballBody.position - upperMotionSamplePosition).magnitude : 0f;
 
     private MedalSlotJackpotController owner;
     private Rigidbody ballBody;
@@ -200,6 +205,7 @@ public sealed class MedalBallLotteryStation : MonoBehaviour
         LastRecoveryBallInstanceId = "";
         LastRecoveryUsedOutBlockCount = 0;
         LastRecoveryColorGatesOpen = false;
+        LastRecoveryHorizontalSpeed = 0f;
         upperStalledAt = -1f;
         RefreshUpperWinText();
         LastPocket = null;
@@ -363,29 +369,30 @@ public sealed class MedalBallLotteryStation : MonoBehaviour
             || ActiveBall.station != this || ActiveBall.ticket != CurrentTicket || ActiveBall.IsConsumed) return false;
         Vector3 localPosition = transform.InverseTransformPoint(ballBody.position);
         Vector3 radial = Horizontal(localPosition - guideLocalCenter);
-        float insideRadius = Mathf.Max(.1f, bumperBowlOuterRadius - ballLocalRadius - .025f);
-        // A falling or already departing sphere must finish through the real OUT.
-        // Recovery is reserved for a stalled sphere still supported by the deck.
+        float insideRadius = Mathf.Max(.1f, bumperBowlOuterRadius + ballLocalRadius + .04f - .015f);
+        // OUT is checked before recovery. Include supported outer rim/port/guard
+        // contacts, while keeping a small margin inside the whole-ball OUT edge.
+        // A falling sphere or one outside the deck's height band is never relaunched.
         if (localPosition.y < .30f || localPosition.y > 1.65f || radial.sqrMagnitude > insideRadius * insideRadius)
         {
             ResetUpperMotionTracking();
             return false;
         }
-        if (Time.time - upperMotionSampleAt < .20f) return false;
+        // Hold the anchor for the whole window. Checking every physics step sees
+        // real excursions even when a normal orbit returns to its start later.
+        // Collision jitter can have high velocity without escaping this area.
         float moved = Horizontal(ballBody.position - upperMotionSamplePosition).magnitude;
-        upperMotionSampleAt = Time.time;
-        upperMotionSamplePosition = ballBody.position;
-        bool stopped = Horizontal(ballBody.linearVelocity).magnitude < Mathf.Max(.01f, upperStallSpeed)
-            && moved < Mathf.Max(.01f, upperStallDisplacement);
-        if (!stopped)
+        if (moved >= Mathf.Max(.01f, upperStallDisplacement))
         {
-            upperStalledAt = -1f;
+            ResetUpperMotionTracking();
             return false;
         }
-        if (upperStalledAt < 0f) upperStalledAt = Time.time;
+        if (upperStalledAt < 0f) upperStalledAt = upperMotionSampleAt;
         if (Time.time - upperStalledAt < Mathf.Max(.1f, upperStallDuration)) return false;
 
-        LastRecoveryReason = "stalled-on-upper-deck";
+        LastRecoveryHorizontalSpeed = Horizontal(ballBody.linearVelocity).magnitude;
+        LastRecoveryReason = LastRecoveryHorizontalSpeed < Mathf.Max(.01f, upperStallSpeed)
+            ? "stalled-on-upper-deck" : "confined-motion-on-upper-deck";
         LastRecoveryTime = Time.time;
         LastRecoveryWin = BumperWin;
         LastRecoveryTicket = CurrentTicket;

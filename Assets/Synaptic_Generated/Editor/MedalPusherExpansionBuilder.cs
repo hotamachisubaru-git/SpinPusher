@@ -337,6 +337,12 @@ public static class MedalPusherExpansionBuilder
         if (controller.stations == null || controller.stations.Length != 3 || controller.stations.Select(s => s.kind).Distinct().Count() != 3) throw new InvalidOperationException("Three different jackpot stations required.");
         if (controller.upperStation == null || !controller.upperStation.isUpperStation || !controller.upperStation.usesBumpers) throw new InvalidOperationException("Upper physical bumper lottery required.");
         var upper = controller.upperStation;
+        var steelBall = AssetDatabase.LoadAssetAtPath<Material>(MedalLotteryStationBuilder.SteelBallMaterialPath);
+        var greenBall = AssetDatabase.LoadAssetAtPath<Material>(MedalLotteryStationBuilder.GreenMaterialPath);
+        if (steelBall == null || greenBall == null || upper.lotteryBallPrefab.GetComponent<Renderer>().sharedMaterial != steelBall ||
+            controller.stations.Any(s => s.lotteryBallPrefab.GetComponent<Renderer>().sharedMaterial != steelBall) ||
+            controller.ballPrefabs.Any(p => p.GetComponent<Renderer>().sharedMaterial != greenBall))
+            throw new InvalidOperationException("Lottery spheres must be silver steel; pusher board spheres must remain green.");
         if (upper.bumpers == null || upper.bumpers.Length != 4 || upper.bumpers.Any(b => b == null || b.station != upper || b.GetComponent<Collider>() == null || b.GetComponent<Collider>().isTrigger)) throw new InvalidOperationException("Four solid round bumpers required.");
         if (upper.upperOutflow == null || upper.upperOutflow.station != upper || upper.GetComponentsInChildren<MedalLotteryPocket>().Length != 0) throw new InvalidOperationException("Upper draw must finish through actual outflow rather than WIN pockets.");
         var upperFloor = upper.transform.Find("UpperBumperPlayFloor");
@@ -362,7 +368,8 @@ public static class MedalPusherExpansionBuilder
             if (controller.stations[i].kind != (MedalJackpotKind)i) throw new InvalidOperationException("Station kind/order mismatch.");
         if (UnityEngine.Object.FindFirstObjectByType<MedalArcadeUI>() == null) throw new InvalidOperationException("Arcade UI missing.");
         var report = new { success = true, inlets = game.medalInlets.Length, boardBallTypes = controller.ballPrefabs.Length, genericPrizePrefabs = game.prizePrefabs.Length, genericBoardPrizes = 0, genericPrizeSpawning = manager.spawnGenericPrizes, inletSelectionButtons = 0,
-            upper = new { bumpers = upper.bumpers.Length, winPerHit = 2, colorDrawOnActualPocketEntry = true, resumeSameUpperBallAfterColorDraw = true, openColorGatesAboveWin = 100, flatReferenceDisk = true, clearRimGuards = clearRimGuards.Length, rearPocketIsYellow = true, upperExitOpenings = 1, separateFrontSelector = false, winPockets = upper.GetComponentsInChildren<MedalLotteryPocket>().Length, colorPockets = upper.colorRoutePockets.Length, independentOutBlocks = upper.outBlocks.Length, usesPerOutBlock = 1, exteriorExits = upper.outflows.Length, withdrawDirection = "down" },
+            lotteryBallAppearance = "silver-steel", boardBallAppearance = "green",
+            upper = new { bumpers = upper.bumpers.Length, winPerHit = 2, colorDrawOnActualPocketEntry = true, resumeSameUpperBallAfterColorDraw = true, openColorGatesAboveWin = 100, flatReferenceDisk = true, clearRimGuards = clearRimGuards.Length, rearPocketIsYellow = true, upperExitOpenings = 1, separateFrontSelector = false, winPockets = upper.GetComponentsInChildren<MedalLotteryPocket>().Length, colorPockets = upper.colorRoutePockets.Length, independentOutBlocks = upper.outBlocks.Length, usesPerOutBlockPerCycle = 1, regenerateAfterAllBlocksUsed = upper.regenerateOutBlocks, exteriorExits = upper.outflows.Length, withdrawDirection = "down" },
             sidePayoutPositions = game.sidePayoutPoints.Select(p => { Vector3 v = game.transform.InverseTransformPoint(p.position); return new { x = v.x, y = v.y, z = v.z }; }).ToArray(),
             stations = controller.stations.Select(s => new { kind = s.kind.ToString(), pockets = s.GetComponentsInChildren<MedalLotteryPocket>().Length, liveJackpotAmount = s.jackpotPocketText != null, randomCentralPartitions = s.dividerBody != null }).ToArray() };
         WriteReport("expansion-scene-validation.json", report);

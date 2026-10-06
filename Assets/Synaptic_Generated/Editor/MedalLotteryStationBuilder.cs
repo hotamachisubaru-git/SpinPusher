@@ -11,8 +11,20 @@ public static class MedalLotteryStationBuilder
 {
     private const string Root = "Assets/Synaptic_Generated/MedalPusher/Lottery";
     public const string GreenMaterialPath = Root + "/Materials/DrawGreen.mat";
+    public const string SteelBallMaterialPath = Root + "/Materials/DrawBallSteel.mat";
+    // Previously the rail exterior was .80, with a .64 throat and a rim gap
+    // of about .59. The exterior is now 1.04 (+30%), with a .88 clear throat.
+    public const float UpperColorPortThroatWidth = .88f;
+    public const float UpperColorPortEntryWidth = 1.04f;
+    public const float UpperColorPortFloorWidth = .96f;
+    public const float UpperColorPortGateWidth = .92f;
+    public const float UpperColorPortFloorTopY = .20f;
+    public const float UpperColorPortRouteFrontZ = .32f;
+    public const float UpperColorPortRimHalfAngleDegrees = 19f;
     public static Material GreenBallMaterial => green;
+    public static Material SteelBallMaterial => steelBall;
     private static Material gold, white, black, ruby, sapphire, amber, green;
+    private static Material steelBall;
     private static Material upperClear, upperCrystal, upperPurple, upperGlow;
     private static PhysicsMaterial surfacePhysics;
     private static TMP_FontAsset font;
@@ -49,6 +61,10 @@ public static class MedalLotteryStationBuilder
         sapphire = MakeMaterial("DrawSapphire", new Color(.025f, .50f, 1f), .25f, .5f);
         amber = MakeMaterial("DrawAmber", new Color(1f, .78f, .045f), .25f, .5f);
         green = MakeMaterial("DrawGreen", new Color(.035f, .94f, .30f), .18f, .45f);
+        steelBall = MakeMaterial("DrawBallSteel", new Color(.72f, .77f, .82f), .92f);
+        steelBall.SetFloat("_Smoothness", .85f);
+        steelBall.DisableKeyword("_EMISSION");
+        steelBall.SetColor("_EmissionColor", Color.black);
         upperClear = MakeTransparentMaterial("DrawUpperClear", new Color(.72f, .91f, 1f, .18f), .91f);
         upperCrystal = MakeTransparentMaterial("DrawUpperCrystal", new Color(.90f, .97f, 1f, .64f), .88f);
         upperPurple = MakeMaterial("DrawUpperPurple", new Color(.51f, .16f, .78f), .12f, .18f);
@@ -66,7 +82,7 @@ public static class MedalLotteryStationBuilder
         if (field == null) throw new ArgumentNullException(nameof(field));
         if (EditorApplication.isPlayingOrWillChangePlaymode)
             throw new InvalidOperationException("Stop Play mode before rebuilding the upper lottery.");
-        if (ballPrefab == null || green == null || surfacePhysics == null || upperClear == null) PrepareAssets();
+        if (ballPrefab == null || green == null || steelBall == null || surfacePhysics == null || upperClear == null) PrepareAssets();
         var decor = field.Find("TreasureCabinetDecor");
         if (decor == null || decor.Find("FourSidedTreasureTower") == null)
             throw new InvalidOperationException("Build the central treasure tower before its upper lottery.");
@@ -162,7 +178,12 @@ public static class MedalLotteryStationBuilder
         for (int i = 0; i < segments; i++)
         {
             float angle = i * Mathf.PI * 2f / segments;
-            // Three narrow color ports replace cardinal rim sections. The
+            // Move the six port-adjacent pieces four degrees away from each
+            // cardinal opening. Count and front OUT geometry stay unchanged.
+            float shift = (UpperColorPortRimHalfAngleDegrees - 15f) * Mathf.Deg2Rad;
+            if (i == 1 || i == 7 || i == 13) angle += shift;
+            else if (i == 5 || i == 11 || i == 23) angle -= shift;
+            // Three color ports replace cardinal rim sections. The
             // broad front opening holds four independently retracting plates.
             if (i == 0 || i == 6 || i == 12 || (i >= 16 && i <= 20)) continue;
             Vector3 radial = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
@@ -211,17 +232,29 @@ public static class MedalLotteryStationBuilder
             port.localRotation = Quaternion.FromToRotation(Vector3.forward, directions[i]);
             // A level extension catches the sphere beyond the disk edge. Its
             // entrance is sealed by a real vertical gate until live WIN > 100.
-            Box("ColorPortFloor", port, new Vector3(0f, .14f, .22f), new Vector3(.64f, .12f, .78f), colors[i], true);
+            Box("ColorPortFloor", port, new Vector3(0f, UpperColorPortFloorTopY - .06f, .26f),
+                new Vector3(UpperColorPortFloorWidth, .12f, 1.00f), colors[i], true);
             for (int side = -1; side <= 1; side += 2)
-                Box("ColorPortSideRail", port, new Vector3(side * .36f, .59f, .18f), new Vector3(.08f, .78f, .80f), gold, true);
-            var gate = Box("ColorGate_" + (MedalJackpotKind)i, port, new Vector3(0f, .65f, 0f),
-                new Vector3(.68f, .90f, .12f), colors[i], true);
+            {
+                const float railThickness = .08f, throatStartZ = .08f, tunnelEndZ = .76f;
+                float throatRailX = side * (UpperColorPortThroatWidth * .5f + railThickness * .5f);
+                Vector3 first = new Vector3(side * (UpperColorPortEntryWidth * .5f + railThickness * .5f),
+                    UpperColorPortFloorTopY + .39f, -.50f);
+                Vector3 second = new Vector3(throatRailX, first.y, throatStartZ);
+                var funnel = Box("ColorPortFunnelRail", port, (first + second) * .5f,
+                    new Vector3(railThickness, .78f, Vector3.Distance(first, second)), gold, true);
+                funnel.localRotation = Quaternion.FromToRotation(Vector3.forward, second - first);
+                Box("ColorPortSideRail", port, new Vector3(throatRailX, first.y, (throatStartZ + tunnelEndZ) * .5f),
+                    new Vector3(railThickness, .78f, tunnelEndZ - throatStartZ), gold, true);
+            }
+            var gate = Box("ColorGate_" + (MedalJackpotKind)i, port, new Vector3(0f, UpperColorPortFloorTopY + .45f, 0f),
+                new Vector3(UpperColorPortGateWidth, .90f, .12f), colors[i], true);
             var body = gate.gameObject.AddComponent<Rigidbody>();
             ConfigureKinematicBody(body);
             var trigger = Group("ColorRouteTrigger", port);
-            trigger.localPosition = new Vector3(0f, .44f, .20f);
+            trigger.localPosition = new Vector3(0f, .44f, UpperColorPortRouteFrontZ + .12f);
             var collider = trigger.gameObject.AddComponent<BoxCollider>();
-            collider.size = new Vector3(.56f, .90f, .30f);
+            collider.size = new Vector3(UpperColorPortThroatWidth - .08f, .90f, .24f);
             collider.isTrigger = true;
             var pocket = trigger.gameObject.AddComponent<MedalColorRoutePocket>();
             pocket.station = station;
@@ -230,7 +263,8 @@ public static class MedalLotteryStationBuilder
             station.colorRoutePockets[i] = pocket;
             station.colorGateBodies[i] = body;
             station.colorGateClosedPositions[i] = gate.localPosition;
-            Box("ColorGateGoldTrim", gate, new Vector3(0f, .52f, 0f), new Vector3(.70f, .045f, .14f), gold, false);
+            Box("ColorGateGoldTrim", gate, new Vector3(0f, .52f, 0f),
+                new Vector3((UpperColorPortGateWidth + .02f) / UpperColorPortGateWidth, .045f, .14f), gold, false);
         }
         station.colorGateRaiseHeight = 1.20f;
         station.colorGateMoveSpeed = 4f;
@@ -468,7 +502,7 @@ public static class MedalLotteryStationBuilder
         var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         ball.name = "DrawLotteryBall";
         ball.transform.localScale = Vector3.one * .52f;
-        ball.GetComponent<Renderer>().sharedMaterial = green;
+        ball.GetComponent<Renderer>().sharedMaterial = steelBall;
         ball.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
         ball.GetComponent<Collider>().sharedMaterial = surfacePhysics;
         var body = ball.AddComponent<Rigidbody>();

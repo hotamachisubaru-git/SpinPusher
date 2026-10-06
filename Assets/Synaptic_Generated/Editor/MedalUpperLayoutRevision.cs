@@ -8,6 +8,9 @@ public static class MedalUpperLayoutRevision
     [MenuItem("Tools/Medal Pusher/Apply Upper Tuning And Display Settings")]
     public static void ApplyUpperTuning() => Apply();
 
+    [MenuItem("Tools/Medal Pusher/Apply Upper Anti Stuck Layout")]
+    public static void ApplyUpperAntiStuck() => ApplyUpperLayout(false);
+
     [MenuItem("Tools/Medal Pusher/Validate JP Growth Rates")]
     public static void ValidateGrowth()
     {
@@ -32,7 +35,9 @@ public static class MedalUpperLayoutRevision
     }
 
     [MenuItem("Tools/Medal Pusher/Apply Requested Upper Layout")]
-    public static void Apply()
+    public static void Apply() => ApplyUpperLayout(true);
+
+    private static void ApplyUpperLayout(bool rebuildBoardAndUI)
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
             throw new InvalidOperationException("Stop Play mode before changing the upper layout.");
@@ -44,7 +49,8 @@ public static class MedalUpperLayoutRevision
             throw new InvalidOperationException("Medal pusher controller missing.");
         var field = controller.game.transform.Find("GeneratedPlayfield");
         controller.upperStation = MedalLotteryStationBuilder.BuildUpperStation(field);
-        MedalPusherExpansionBuilder.ApplyClickPlacementAndBallOnlyToScene(scene, controller.game);
+        if (rebuildBoardAndUI)
+            MedalPusherExpansionBuilder.ApplyClickPlacementAndBallOnlyToScene(scene, controller.game);
         EditorUtility.SetDirty(controller);
         MedalPusherExpansionBuilder.Validate();
         EditorSceneManager.MarkSceneDirty(scene);

@@ -656,7 +656,7 @@ public static class MedalIntegratedUpperFlowPlayCheck
     private static void CheckGreenPrefabs()
     {
         Require(controller.stations.All(s => s.dividerRotor != null && s.dividerBody != null && s.dividerBody.isKinematic), "Colored moving partition rotors are missing.");
-        Check("allDrawAndBoardBallsUseGreenMaterial", Green(upper.lotteryBallPrefab) && controller.stations.All(s => Green(s.lotteryBallPrefab)) &&
+        Check("drawBallsAreSteelAndBoardBallsRemainGreen", Steel(upper.lotteryBallPrefab) && controller.stations.All(s => Steel(s.lotteryBallPrefab)) &&
             controller.ballPrefabs != null && controller.ballPrefabs.Length == 3 && controller.ballPrefabs.All(Green));
         Check("legacyNonBallPrizesAndPrefabsAreAbsent", (game.prizePrefabs == null || game.prizePrefabs.Length == 0) &&
             !game.itemsRoot.GetComponentsInChildren<MedalItem>(true).Any(item => item.isPrize && !item.isBall));
@@ -667,6 +667,13 @@ public static class MedalIntegratedUpperFlowPlayCheck
             game.GetComponentsInChildren<MedalSlotPocket>(true).Length == 3 && (arcade.inletButtons == null || arcade.inletButtons.Length == 0) && (arcade.inletLights == null || arcade.inletLights.Length == 0) &&
             !UnityEngine.Object.FindObjectsByType<Transform>().Any(t => t.name.StartsWith("InletButton_", StringComparison.Ordinal)));
         Check("coloredPhysicalJackpotLabelsUseJackpot", controller.stations.All(s => s.jackpotPocketText != null && s.jackpotPocketText.text.Contains("JACKPOT") && !s.jackpotPocketText.text.Contains("大当たり")));
+    }
+    private static bool Steel(GameObject prefab)
+    {
+        var material = prefab == null ? null : prefab.GetComponent<Renderer>()?.sharedMaterial;
+        if (material == null || !material.HasProperty("_Metallic")) return false;
+        Color color = material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor") : material.color;
+        return material.GetFloat("_Metallic") >= .85f && Mathf.Max(color.r, color.g, color.b) - Mathf.Min(color.r, color.g, color.b) < .2f;
     }
     private static void CheckPoolLabels(string suffix)
     {
@@ -826,7 +833,7 @@ public static class MedalIntegratedUpperFlowPlayCheck
             if (upper.ActiveBall == null) return;
             upperToken = upper.ActiveBall; upperObjectId = upperToken.GetEntityId().ToString(); ticket = upper.CurrentTicket;
             var probe = upperToken.gameObject.AddComponent<MedalIntegratedUpperFlowBumperProbe>(); probe.Round = roundIndex; probe.Token = upperToken;
-            Check("newGreenBallResetsWinAndAllFourGuards_" + roundIndex, upperToken.station == upper && upperToken.ticket == ticket && Green(upper.lotteryBallPrefab) &&
+            Check("newSteelBallResetsWinAndAllFourGuards_" + roundIndex, upperToken.station == upper && upperToken.ticket == ticket && Steel(upper.lotteryBallPrefab) &&
                 upper.BumperWin == 0 && upper.TotalBumperHits == 0 && controller.LiveUpperWin == 0 && upper.UsedOutBlockCount == 0 && !GuardStates().Any(used => used) &&
                 !upper.ColorGatesOpen && !controller.AreColorGatesUnlocked && upperStartEvents == mainUpperStartBaseline + 1);
             NegativeUpperChecks();
@@ -921,7 +928,13 @@ public static class MedalIntegratedUpperFlowPlayCheck
         if (guardStage == 4)
         {
             if (Time.fixedTime - guardUsedFixed < .85f) return;
-            Check("onlyUsedGuardPlatesWithdrawIndependently_" + guardIndex, GuardTargetsMatch() && upper.UsedOutBlockCount == guardIndex + 1 && SameUpperIdentity());
+            if (guardIndex == 3 && upper.regenerateOutBlocks)
+            {
+                if (upper.OutBlockRegenerationCount == 0 || !upper.OutBlockReady) return;
+                Check("allFourGuardsRegenerateAfterLastGuard", GuardTargetsMatch() && upper.UsedOutBlockCount == 0 &&
+                    !GuardStates().Any(used => used) && SameUpperIdentity());
+            }
+            else Check("onlyUsedGuardPlatesWithdrawIndependently_" + guardIndex, GuardTargetsMatch() && upper.UsedOutBlockCount == guardIndex + 1 && SameUpperIdentity());
             successfulGuardCount++; guardContacts.Add(new { index = guardIndex, tokenId = upperObjectId, ticket, used = GuardStates(),
                 actualCollisionEnterCount = physicalGuardContacts[block] - guardContactBaseline, position = Pos(upper.outBlockBodies[guardIndex].position), win = upper.BumperWin });
             if (guardIndex == 0) { integratedStep = afterGuard; visitStage = 0; return; }
@@ -1015,7 +1028,8 @@ public static class MedalIntegratedUpperFlowPlayCheck
         Vector3 normal = upper.transform.TransformPoint(upper.guideLocalCenter) - collider.bounds.center; normal.y = 0; normal.Normalize();
         float radius = upperToken.GetComponent<Collider>().bounds.extents.x;
         Vector3 face = collider.ClosestPoint(collider.bounds.center + normal * (collider.bounds.extents.magnitude + 1));
-        Place(upperToken.GetComponent<Rigidbody>(), face + normal * (radius + .05f)); upperToken.GetComponent<Rigidbody>().linearVelocity = -normal * 4f;
+        // This fixture starts beyond the restored plates, at the real OUT entrance.
+        Place(upperToken.GetComponent<Rigidbody>(), face + normal * .005f); upperToken.GetComponent<Rigidbody>().linearVelocity = -normal * 4f;
     }
     private static void SampleNaturalUpper()
     {

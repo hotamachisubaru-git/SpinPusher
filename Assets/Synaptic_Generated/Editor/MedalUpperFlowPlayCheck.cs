@@ -610,9 +610,16 @@ public static class MedalUpperFlowPlayCheck
     private static void CheckGreenPrefabs()
     {
         Require(controller.stations.All(s => s.dividerRotor != null && s.dividerBody != null && s.dividerBody.isKinematic), "Colored moving partition rotors are missing.");
-        Check("allDrawAndBoardBallsUseGreenMaterial", Green(upper.lotteryBallPrefab) && controller.stations.All(s => Green(s.lotteryBallPrefab)) &&
+        Check("drawBallsAreSteelAndBoardBallsRemainGreen", Steel(upper.lotteryBallPrefab) && controller.stations.All(s => Steel(s.lotteryBallPrefab)) &&
             controller.ballPrefabs != null && controller.ballPrefabs.Length == 3 && controller.ballPrefabs.All(Green));
         Check("coloredPhysicalJackpotLabelsUseJackpot", controller.stations.All(s => s.jackpotPocketText != null && s.jackpotPocketText.text.Contains("JACKPOT") && !s.jackpotPocketText.text.Contains("大当たり")));
+    }
+    private static bool Steel(GameObject prefab)
+    {
+        var material = prefab == null ? null : prefab.GetComponent<Renderer>()?.sharedMaterial;
+        if (material == null || !material.HasProperty("_Metallic")) return false;
+        Color color = material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor") : material.color;
+        return material.GetFloat("_Metallic") >= .85f && Mathf.Max(color.r, color.g, color.b) - Mathf.Min(color.r, color.g, color.b) < .2f;
     }
     private static void CheckPoolLabels(string suffix)
     {
