@@ -19,6 +19,7 @@ public sealed class MedalArcadeSettings : MonoBehaviour
     public int rescueSpins = 4;
     public int[] jackpotResetValues = { 150, 250, 500 };
     public float sideHoleWidth = .55f;
+    public bool showLotteryStatus = false;
 
     public string LastError { get; private set; } = "";
     public bool LoadedFromDisk { get; private set; }
@@ -45,6 +46,7 @@ public sealed class MedalArcadeSettings : MonoBehaviour
         public int rescueSpins = 4;
         public int[] jackpotResetValues = { 150, 250, 500 };
         public float sideHoleWidth = .55f;
+        public bool showLotteryStatus = false;
     }
 
     private void Start()
@@ -67,7 +69,7 @@ public sealed class MedalArcadeSettings : MonoBehaviour
         slotMedalChancePercent = slotMedalChancePercent, medalsPerSpin = medalsPerSpin,
         slotSpinDuration = slotSpinDuration, rescueSpins = rescueSpins,
         jackpotResetValues = jackpotResetValues == null ? null : (int[])jackpotResetValues.Clone(),
-        sideHoleWidth = sideHoleWidth
+        sideHoleWidth = sideHoleWidth, showLotteryStatus = showLotteryStatus
     };
 
     /// <summary>Checks all fields before changing any component value.</summary>
@@ -134,6 +136,7 @@ public sealed class MedalArcadeSettings : MonoBehaviour
         slotBallChancePercent = values.slotBallChancePercent; slotMedalChancePercent = values.slotMedalChancePercent;
         medalsPerSpin = values.medalsPerSpin; slotSpinDuration = values.slotSpinDuration; rescueSpins = values.rescueSpins;
         jackpotResetValues = (int[])values.jackpotResetValues.Clone(); sideHoleWidth = values.sideHoleWidth;
+        showLotteryStatus = values.showLotteryStatus;
     }
 
     public bool Load()

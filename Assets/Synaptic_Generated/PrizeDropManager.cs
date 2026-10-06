@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>Spawns physical prizes and awards each collected item exactly once.</summary>
+/// <summary>Collects medals and lottery balls; optional legacy prize spawning stays disabled.</summary>
 [RequireComponent(typeof(MedalPusherGame))]
 public class PrizeDropManager : MonoBehaviour
 {
@@ -10,6 +10,7 @@ public class PrizeDropManager : MonoBehaviour
     public Vector2 dropZoneSize = new Vector2(8f, 2f);
     public float dropYPosition = -2f;
     [Header("Prize Settings")]
+    public bool spawnGenericPrizes;
     public int minPrizesOnBoard = 8;
     public int maxPrizesOnBoard = 15;
     public float prizeSpawnInterval = 2f;
@@ -30,6 +31,7 @@ public class PrizeDropManager : MonoBehaviour
 
     void Start()
     {
+        if (!spawnGenericPrizes) return;
         RefreshPrizeTypes();
         int minimum = Mathf.Clamp(minPrizesOnBoard, 0, PrizeLimit());
         int initialCount = game != null ? game.CountBoardItems(true) : 0;
@@ -39,7 +41,7 @@ public class PrizeDropManager : MonoBehaviour
 
     void Update()
     {
-        if (game == null) return;
+        if (game == null || !spawnGenericPrizes) return;
         spawnTimer -= Time.deltaTime;
         if (spawnTimer > 0f) return;
         if (game.CountBoardItems(true) < Mathf.Clamp(minPrizesOnBoard, 0, PrizeLimit())) SpawnPrize();
@@ -65,7 +67,7 @@ public class PrizeDropManager : MonoBehaviour
 
     public void SpawnPrize()
     {
-        if (game == null || game.CountBoardItems(true) >= PrizeLimit()) return;
+        if (game == null || !spawnGenericPrizes || game.CountBoardItems(true) >= PrizeLimit()) return;
         if (validTypes.Count == 0) RefreshPrizeTypes();
         if (validTypes.Count == 0) return;
         float total = 0f;

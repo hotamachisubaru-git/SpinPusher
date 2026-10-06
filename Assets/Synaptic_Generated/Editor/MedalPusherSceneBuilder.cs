@@ -77,7 +77,6 @@ public static class MedalPusherSceneBuilder
         PrefabUtility.SaveAsPrefabAsset(plate, AssetRoot + "/Prefabs/PusherPlate.prefab");
 
         var coin = CreateMedal(physics);
-        var prizes = CreatePrizes(physics);
         var game = GetOrAdd<MedalPusherGame>(gameObject);
         var manager = GetOrAdd<PrizeDropManager>(gameObject);
         var input = GetOrAdd<MedalInputHandler>(gameObject);
@@ -94,7 +93,7 @@ public static class MedalPusherSceneBuilder
         game.maxPrizesOnBoard = 8;
         game.medalSpawnHeight = 2.4f;
         game.medalPrefab = coin;
-        game.prizePrefabs = prizes;
+        game.prizePrefabs = Array.Empty<GameObject>();
         game.bonusMedalPrefabs = new[] { coin };
         game.pusherBody = pusherBody;
         game.medalSpawnPoint = Child("MedalSpawnPoint", field);
@@ -110,17 +109,14 @@ public static class MedalPusherSceneBuilder
         game.comboEffect = game.prizeDropEffect;
         game.jackpotEffect = game.prizeDropEffect;
         input.game = game;
-        manager.minPrizesOnBoard = 6;
-        manager.maxPrizesOnBoard = 8;
+        manager.spawnGenericPrizes = false;
+        manager.minPrizesOnBoard = 0;
+        manager.maxPrizesOnBoard = 0;
         manager.prizeSpawnInterval = 5f;
         manager.dropZoneCenter = new Vector3(0, -.9f, -5.15f);
         manager.dropZoneSize = new Vector2(10.2f, 1.7f);
         manager.dropYPosition = -.2f;
-        manager.prizeTypes = new[] {
-            new PrizeDropManager.PrizeType { name = "Ruby Capsule", prefab = prizes[0], weight = 5, pointValue = 100 },
-            new PrizeDropManager.PrizeType { name = "Sapphire Box", prefab = prizes[1], weight = 3, pointValue = 200 },
-            new PrizeDropManager.PrizeType { name = "Golden Trophy", prefab = prizes[2], weight = 1, pointValue = 500 }
-        };
+        manager.prizeTypes = Array.Empty<PrizeDropManager.PrizeType>();
         for (int row = 0; row < 7; row++)
             for (int col = 0; col < 12; col++)
             {
@@ -129,12 +125,6 @@ public static class MedalPusherSceneBuilder
                 medal.transform.SetParent(game.itemsRoot);
                 medal.transform.position = new Vector3((col - 5.5f) * .72f, .075f, -4.06f + row * .66f);
             }
-        for (int i = 0; i < 6; i++)
-        {
-            var prize = (GameObject)PrefabUtility.InstantiatePrefab(prizes[i % prizes.Length], scene);
-            prize.transform.SetParent(game.itemsRoot);
-            prize.transform.position = new Vector3((i % 3 - 1) * 2.4f, .7f, -2.9f + (i / 3) * 1.8f);
-        }
         var dropZone = FindRoot(scene, "MedalDropZone") ?? new GameObject("MedalDropZone");
         dropZone.transform.position = manager.dropZoneCenter;
         dropZone.transform.rotation = Quaternion.identity;
@@ -182,10 +172,12 @@ public static class MedalPusherSceneBuilder
             if (game.medalPrefab != null && (game.medalPrefab.GetComponent<Collider>() == null || game.medalPrefab.GetComponent<Collider>().sharedMaterial == null))
                 errors.Add("Medal physics material missing");
             if (game.pusherBody == null || !game.pusherBody.isKinematic) errors.Add("Kinematic pusher missing");
-            if (game.prizePrefabs == null || game.prizePrefabs.Length < 3) errors.Add("Three prize prefabs required");
-            else foreach (var prize in game.prizePrefabs)
-                if (prize == null || prize.GetComponent<Rigidbody>() == null || prize.GetComponent<Rigidbody>().isKinematic || !prize.GetComponent<Rigidbody>().useGravity || prize.GetComponent<MedalItem>() == null)
-                    errors.Add("Prize prefab missing dynamic physics");
+            if (game.prizePrefabs == null || game.prizePrefabs.Length != 0) errors.Add("Generic prize prefabs must stay empty");
+            if (game.itemsRoot != null && game.itemsRoot.GetComponentsInChildren<MedalItem>(true).Any(i => i.isPrize && !i.isBall))
+                errors.Add("Only lottery balls may remain as board prizes");
+            var manager = game.GetComponent<PrizeDropManager>();
+            if (manager == null || manager.spawnGenericPrizes || manager.minPrizesOnBoard != 0 || manager.maxPrizesOnBoard != 0 || manager.prizeTypes == null || manager.prizeTypes.Length != 0)
+                errors.Add("Generic prize replenishment must stay disabled");
             if (new[] { game.medalDropSound, game.medalImpactSound, game.prizeDropSound, game.bonusSound, game.comboSound, game.jackpotSound }.Any(c => c == null))
                 errors.Add("Six SE clips must be assigned");
             if (game.itemsRoot == null || game.medalSpawnPoint == null) errors.Add("Spawn/items references missing");
@@ -322,32 +314,6 @@ public static class MedalPusherSceneBuilder
         UnityEngine.Object.DestroyImmediate(go);
         return result;
     }
-    private static GameObject[] CreatePrizes(PhysicsMaterial physics)
-    {
-        var result = new List<GameObject>();
-        string[] names = { "RubyCapsule", "SapphireBox", "GoldenTrophy" };
-        string[] labels = { "赤カプセル", "青ボックス", "金のトロフィー" };
-        int[] points = { 100, 200, 500 };
-        var mats = new[] { MakeMaterial("PrizeRuby", new Color(.95f, .09f, .26f), .35f, .7f), MakeMaterial("PrizeSapphire", new Color(.03f, .5f, .95f), .4f, .65f), gold };
-        var types = new[] { PrimitiveType.Sphere, PrimitiveType.Cube, PrimitiveType.Capsule };
-        for (int i = 0; i < 3; i++)
-        {
-            var go = GameObject.CreatePrimitive(types[i]);
-            go.name = names[i];
-            go.tag = "Prize";
-            go.transform.localScale = i == 2 ? new Vector3(.55f, .45f, .55f) : Vector3.one * .65f;
-            go.GetComponent<Renderer>().sharedMaterial = mats[i];
-            go.GetComponent<Collider>().sharedMaterial = physics;
-            ConfigureBody(go.AddComponent<Rigidbody>(), .09f + i * .03f);
-            var item = go.AddComponent<MedalItem>();
-            item.isPrize = true;
-            item.displayName = labels[i];
-            item.pointValue = points[i];
-            result.Add(PrefabUtility.SaveAsPrefabAsset(go, AssetRoot + "/Prefabs/" + names[i] + ".prefab"));
-            UnityEngine.Object.DestroyImmediate(go);
-        }
-        return result.ToArray();
-    }
     private static void ConfigureBody(Rigidbody body, float mass)
     {
         body.mass = mass;
@@ -449,7 +415,7 @@ public static class MedalPusherSceneBuilder
         marquee.transform.localPosition = new Vector3(0, 2.7f, 3.83f);
         marquee.transform.localRotation = Quaternion.identity;
         var text = marquee.GetComponent<TextMeshPro>();
-        text.font = Font(); text.text = "TREASURE\nMEDAL PUSHER"; text.fontSize = 4.3f;
+        text.font = Font(); text.text = "− | − | −"; text.fontSize = 4.3f;
         text.alignment = TextAlignmentOptions.Center; text.color = new Color(1, .82f, .25f);
         text.rectTransform.sizeDelta = new Vector2(5.8f, 1.1f);
         var display = cabinet.Find("ScoreDisplay");
@@ -469,7 +435,7 @@ public static class MedalPusherSceneBuilder
         var cameraGo = FindRoot(scene, "Main Camera") ?? new GameObject("Main Camera", typeof(Camera), typeof(AudioListener));
         var camera = GetOrAdd<Camera>(cameraGo);
         cameraGo.tag = "MainCamera";
-        cameraGo.transform.position = new Vector3(11.4f, 12f, -17.8f);
+        cameraGo.transform.position = new Vector3(0f, 10.3f, -17.2f);
         cameraGo.transform.LookAt(new Vector3(0, 1.7f, 1.4f));
         camera.fieldOfView = 48;
         camera.nearClipPlane = .1f;
@@ -504,7 +470,7 @@ public static class MedalPusherSceneBuilder
         var scaler = go.GetComponent<CanvasScaler>(); scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize; scaler.referenceResolution = new Vector2(1920, 1080); scaler.matchWidthOrHeight = .5f;
         var ui = go.AddComponent<MedalPusherUI>();
         Panel("Header", go.transform, new Vector2(.025f, .865f), new Vector2(.975f, .975f), new Color(.025f, .03f, .075f, .94f));
-        Text("Title", go.transform, "TREASURE / MEDAL PUSHER", new Vector2(.045f, .885f), new Vector2(.49f, .96f), 34, new Color(1, .8f, .25f));
+        Text("Title", go.transform, "スロット", new Vector2(.045f, .885f), new Vector2(.49f, .96f), 34, new Color(1, .8f, .25f));
         Text("ScoreLabel", go.transform, "SCORE", new Vector2(.53f, .928f), new Vector2(.69f, .96f), 20, Color.gray);
         ui.scoreText = Text("ScoreValue", go.transform, "000000", new Vector2(.53f, .882f), new Vector2(.72f, .93f), 38, Color.yellow);
         Text("MedalLabel", go.transform, "MEDALS", new Vector2(.78f, .928f), new Vector2(.94f, .96f), 20, Color.gray);
@@ -526,11 +492,6 @@ public static class MedalPusherSceneBuilder
         ui.prizeCanvas = notification.gameObject.AddComponent<Canvas>();
         ui.prizeDisplay = Text("PrizeText", notification, "", Vector2.zero, Vector2.one, 30, Color.white);
         ui.prizeDisplay.alignment = TextAlignmentOptions.Center;
-        var combo = Panel("ComboPanel", go.transform, new Vector2(.025f, .72f), new Vector2(.22f, .8f), new Color(.05f, .02f, .1f, .85f));
-        ui.comboPanel = combo.gameObject;
-        ui.comboText = Text("ComboText", combo, "", Vector2.zero, Vector2.one, 27, new Color(1, .5f, .1f));
-        ui.comboText.alignment = TextAlignmentOptions.Center;
-        combo.gameObject.SetActive(false);
         var jackpot = Panel("JackpotPanel", go.transform, new Vector2(.25f, .45f), new Vector2(.75f, .58f), new Color(.18f, .025f, .19f, .92f));
         ui.jackpotPanel = jackpot.gameObject;
         ui.jackpotText = Text("JackpotText", jackpot, "JACKPOT", Vector2.zero, Vector2.one, 45, Color.yellow);

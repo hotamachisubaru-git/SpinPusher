@@ -2,15 +2,19 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-/// <summary>Shows slots, the three progressive jackpots, and the selected inlet.</summary>
+/// <summary>Shows slots, the three progressive jackpots, and ongoing ball lotteries.</summary>
 public class MedalArcadeUI : MonoBehaviour
 {
     public MedalPusherGame game;
     public MedalSlotJackpotController controller;
+    public MedalArcadeSettings settings;
     public TMP_Text reelsText;
+    public TMP_Text worldReelsText;
     public TMP_Text spinMeterText;
     public TMP_Text statusText;
+    public GameObject lotteryStatusPanel;
     public TMP_Text upperWinText;
+    public TMP_Text payoutRemainingText;
     public TMP_Text[] jackpotTexts;
     public TMP_Text[] stationMeters;
     public TMP_Text[] towerJackpotValues;
@@ -27,6 +31,10 @@ public class MedalArcadeUI : MonoBehaviour
     private bool celebratingJackpot;
     private Color celebrationColor;
     private bool lotteryFocused;
+    private long shownPendingPayout = -1;
+    private float nextReelRefresh;
+    private string lastReelValue;
+    private bool lotteryStatusPanelSearched;
 
     void Start()
     {
@@ -43,23 +51,28 @@ public class MedalArcadeUI : MonoBehaviour
             controller.OnColorSelectionStarted += OnColorSelectionStarted;
             controller.OnColorSelectionFinished += OnColorSelectionFinished;
         }
-        if (game != null) game.OnInletChanged += OnInletChanged;
         Refresh();
-        OnInletChanged(game != null ? game.selectedInlet : 1);
     }
 
     public void Refresh()
     {
+        RefreshLotteryStatusVisibility();
         if (controller == null) return;
-        if (reelsText != null) reelsText.text = controller.SlotDisplay;
+        RefreshReels();
+        RefreshPayout();
         if (spinMeterText != null)
-            spinMeterText.text = "投入 " + controller.MedalsTowardSpin + "/" + controller.medalsPerSpin + " ｜ 抽選待ち " + controller.SpinCredits;
+            spinMeterText.text = (controller.IsHighProbability ? "<color=#FF7589>確変中</color>" : "通常")
+                + (controller.IsHighProbability && controller.CarriedUpperWin > 0 ? " ｜ 持越" + controller.CarriedUpperWin + "WIN" : "")
+                + " ｜ 抽選待ち " + controller.SpinCredits;
         if (statusText != null) statusText.text = controller.StatusText;
         if (upperWinText != null)
-            upperWinText.text = controller.IsSelectingColor ? "ポケット開放：赤／青／黄の入賞待ち\n白い板：残り"
-                + (controller.upperStation != null && controller.upperStation.OutBlockUsed ? 0 : 1) + "回"
-                : controller.IsUpperDrawing ? "上段ボール抽選中：WIN 100枚超えでポケット開放"
-                : "上段WIN " + controller.LastUpperWin + "枚 ｜ 100枚超えでポケット開放";
+            upperWinText.text = controller.IsUpperDrawing ? controller.LiveUpperWin.ToString("D2") + "WIN（枚獲得）\n"
+                    + (controller.UpperWinCarriedAtStart > 0 ? "引継" + controller.UpperWinCarriedAtStart + "WIN ｜ 今回+" + controller.UpperWinEarnedThisRound + "枚"
+                        : controller.IsColorRoundActive ? "色抽選中：結果後に同じ上段ボールで続行"
+                        : controller.AreColorGatesUnlocked ? "3色開放：赤／青／黄へ入賞で色抽選"
+                        : "100WIN超で3色開放・色抽選後も上段続行")
+                : controller.LastUpperWin.ToString("D2") + "WIN（枚獲得）\n"
+                    + (controller.IsHighProbability && controller.CarriedUpperWin > 0 ? "次球へ" + controller.CarriedUpperWin + "WIN引き継ぎ" : "100WIN超で3色開放");
         string[] names = { "赤", "青", "黄" };
         Color[] colors = { new Color(1, .25f, .3f), new Color(.25f, .75f, 1), new Color(1, .82f, .25f) };
         for (int i = 0; i < 3; i++)
@@ -90,22 +103,76 @@ public class MedalArcadeUI : MonoBehaviour
         }
     }
 
+    private void RefreshLotteryStatusVisibility()
+    {
+        if (settings == null)
+        {
+            if (game != null) settings = game.GetComponent<MedalArcadeSettings>();
+            else if (controller != null && controller.game != null) settings = controller.game.GetComponent<MedalArcadeSettings>();
+        }
+        if (lotteryStatusPanel == null && !lotteryStatusPanelSearched)
+        {
+            lotteryStatusPanelSearched = true;
+            Transform parent = statusText != null ? statusText.transform.parent : transform;
+            Transform panel = parent == null ? null : parent.Find("DrawStatus");
+            if (panel != null) lotteryStatusPanel = panel.gameObject;
+        }
+        bool visible = settings != null && settings.showLotteryStatus;
+        if (statusText != null && statusText.gameObject.activeSelf != visible) statusText.gameObject.SetActive(visible);
+        if (lotteryStatusPanel != null && lotteryStatusPanel.activeSelf != visible) lotteryStatusPanel.SetActive(visible);
+    }
+
     private int GetPool(int kind) => controller != null && controller.jackpotPools != null &&
         kind >= 0 && kind < controller.jackpotPools.Length ? controller.jackpotPools[kind] : 0;
 
-    private void OnInletChanged(int index)
+    public static string FormatSlotSymbol(int symbol)
     {
-        for (int i = 0; inletButtons != null && i < inletButtons.Length; i++)
-            if (inletButtons[i] != null) inletButtons[i].color = i == index ? new Color(.05f, .7f, .85f) : new Color(.14f, .16f, .24f);
-        for (int i = 0; inletLights != null && i < inletLights.Length; i++)
+        if (symbol < 0) return "<color=#AEBBCC>−</color>";
+        if (symbol == 0) return "<color=#57FF76>ボール</color>";
+        string color = symbol == 7 ? "#FFFFFF" : symbol % 2 == 1 ? "#FF526C" : "#55C4FF";
+        return "<color=" + color + ">" + symbol + "</color>";
+    }
+
+    private void RefreshReels()
+    {
+        if (controller == null) return;
+        var symbols = controller.ReelSymbols;
+        string value = symbols == null || symbols.Count != 3 ? controller.SlotDisplay
+            : FormatSlotSymbol(symbols[0]) + " <color=#8391A6>|</color> "
+                + FormatSlotSymbol(symbols[1]) + " <color=#8391A6>|</color> " + FormatSlotSymbol(symbols[2]);
+        RenderReels(reelsText, value);
+        RenderReels(worldReelsText, value);
+        if (lastReelValue != value)
         {
-            if (inletLights[i] == null) continue;
-            var block = new MaterialPropertyBlock();
-            Color color = i == index ? new Color(.05f, .95f, 1) : new Color(.15f, .18f, .24f);
-            block.SetColor("_BaseColor", color);
-            block.SetColor("_EmissionColor", i == index ? color * 2 : Color.black);
-            inletLights[i].SetPropertyBlock(block);
+            lastReelValue = value;
+            MedalPusherUI.Instance?.RefreshVisibleTextMeshes();
         }
+    }
+
+    private static void RenderReels(TMP_Text text, string value)
+    {
+        if (text == null) return;
+        text.richText = true;
+        text.text = value;
+        text.ForceMeshUpdate();
+        for (int i = 0; i < text.textInfo.characterCount; i++)
+        {
+            var character = text.textInfo.characterInfo[i];
+            if (!character.isVisible || character.character != '7') continue;
+            var colors = text.textInfo.meshInfo[character.materialReferenceIndex].colors32;
+            for (int v = 0; v < 4; v++)
+                colors[character.vertexIndex + v] = Color.HSVToRGB(Mathf.Repeat(Time.unscaledTime * .18f + v * .23f, 1f), .75f, 1f);
+        }
+        text.UpdateVertexData(TMP_VertexDataUpdateFlags.Colors32);
+    }
+
+    private void RefreshPayout()
+    {
+        if (game == null || payoutRemainingText == null) return;
+        long pending = game.PendingPayoutMedals;
+        if (pending == shownPendingPayout) return;
+        shownPendingPayout = pending;
+        payoutRemainingText.text = "PAYOUT  " + pending.ToString("D2") + "枚";
     }
 
     private void OnDrawStarted(MedalJackpotKind kind)
@@ -119,7 +186,12 @@ public class MedalArcadeUI : MonoBehaviour
     }
     private void OnDrawFinished(MedalJackpotKind kind, int payout, bool jackpot)
     {
-        if (controller == null || !controller.IsColorRoundActive) ReleaseLotteryCamera();
+        if (controller != null && controller.IsUpperRoundActive && controller.upperStation != null)
+        {
+            lotteryFocused = true;
+            if (cameraView != null) cameraView.FocusStation(controller.upperStation);
+        }
+        else ReleaseLotteryCamera();
         celebratingJackpot = jackpot;
         celebrationLength = jackpot ? 4f : 1.6f;
         celebrationUntil = Time.unscaledTime + celebrationLength;
@@ -127,9 +199,10 @@ public class MedalArcadeUI : MonoBehaviour
             : kind == MedalJackpotKind.Sapphire ? new Color(.25f, .8f, 1) : new Color(1, .85f, .25f);
         if (payoutBanner != null)
         {
-            string message = jackpot ? "JACKPOT!" : controller != null && controller.LastDrawTimedOut ? "補償ボーナス" : "当たり！";
+            bool interrupted = controller != null && controller.LastDrawTimedOut;
+            string message = jackpot ? "JACKPOT!" : interrupted ? "抽選中断" : "当たり！";
             string colorName = kind == MedalJackpotKind.Ruby ? "赤" : kind == MedalJackpotKind.Sapphire ? "青" : "黄";
-            payoutBanner.text = colorName + message + "\n+" + payout + "枚";
+            payoutBanner.text = colorName + message + (interrupted && payout == 0 ? "" : "\n" + (payout > 0 ? "+" : "") + payout + "枚");
             payoutBanner.gameObject.SetActive(true);
         }
         Refresh();
@@ -162,8 +235,9 @@ public class MedalArcadeUI : MonoBehaviour
         celebrationColor = new Color(.3f, 1f, .5f);
         if (payoutBanner != null)
         {
-            payoutBanner.text = (controller != null && controller.LastDrawTimedOut ? "上段抽選 補償ボーナス" : "上段WIN")
-                + "\n+" + payout + "枚";
+            bool compensation = controller != null && controller.LastDrawTimedOut && !controller.LastUpperWasBumperDraw;
+            payoutBanner.text = (compensation ? "上段抽選 補償ボーナス" : controller != null ? controller.LastUpperWin + "WIN" : "上段WIN")
+                + "\n" + (payout > 0 ? "+" : "") + payout + "枚";
             payoutBanner.gameObject.SetActive(true);
         }
         Refresh();
@@ -196,6 +270,9 @@ public class MedalArcadeUI : MonoBehaviour
 
     void Update()
     {
+        RefreshPayout();
+        if (Time.unscaledTime >= nextReelRefresh)
+        { nextReelRefresh = Time.unscaledTime + .08f; RefreshReels(); }
         if (lotteryFocused && controller != null && !controller.IsUpperDrawing &&
             !controller.IsColorRoundActive && !controller.ActiveKind.HasValue) ReleaseLotteryCamera();
         float remaining = celebrationUntil - Time.unscaledTime;
@@ -239,6 +316,5 @@ public class MedalArcadeUI : MonoBehaviour
             controller.OnColorSelectionStarted -= OnColorSelectionStarted;
             controller.OnColorSelectionFinished -= OnColorSelectionFinished;
         }
-        if (game != null) game.OnInletChanged -= OnInletChanged;
     }
 }

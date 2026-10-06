@@ -1,6 +1,6 @@
 using UnityEngine;
 
-/// <summary>Routes the actual green selector ball to its visible colored lottery.</summary>
+/// <summary>Routes a real upper-ball entry to a colored lottery while preserving that ball.</summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(BoxCollider))]
 public sealed class MedalColorRoutePocket : MonoBehaviour

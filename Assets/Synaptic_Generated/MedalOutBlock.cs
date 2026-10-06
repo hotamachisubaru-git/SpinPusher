@@ -6,6 +6,7 @@ using UnityEngine;
 public sealed class MedalOutBlock : MonoBehaviour
 {
     public MedalBallLotteryStation station;
+    public int guardIndex;
 
     private void OnCollisionEnter(Collision collision)
     {

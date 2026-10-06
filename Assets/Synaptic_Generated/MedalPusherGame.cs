@@ -62,11 +62,14 @@ public class MedalPusherGame : MonoBehaviour
     public System.Action OnJackpot;
     public System.Action OnMedalInserted;
     public System.Action<int> OnInletChanged;
+    public System.Action<GameObject> OnPaidMedalSpawned;
     public System.Action<GameObject, bool> OnPayoutMedalSpawned;
     public long TotalPaidMedals { get; private set; }
     public long TotalReturnedMedals { get; private set; }
     public long PendingPayoutMedals { get; private set; }
     public bool SettingsOpen { get; private set; }
+    public Vector3 CurrentMedalDropLocalPosition { get; private set; }
+    public GameObject LastInsertedMedal { get; private set; }
 
     private readonly List<MedalItem> boardItems = new List<MedalItem>();
     private readonly HashSet<GameObject> notifiedPrizes = new HashSet<GameObject>();
@@ -87,6 +90,8 @@ public class MedalPusherGame : MonoBehaviour
     private PayoutBatch lastPayoutBatch;
     private PayoutBatch lastJackpotBatch;
     private int sidePayoutSequence;
+    private readonly List<Collider> medalDropSurfaces = new List<Collider>();
+    private readonly List<MedalSlotPocket> medalClickOpenings = new List<MedalSlotPocket>();
     private sealed class PayoutBatch
     {
         public long remaining;
@@ -115,11 +120,12 @@ public class MedalPusherGame : MonoBehaviour
             pusherBody.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
         }
         foreach (MedalItem item in FindObjectsByType<MedalItem>(FindObjectsSortMode.None)) RegisterItem(item);
+        CacheMedalDropSurfaces();
+        CurrentMedalDropLocalPosition = Vector3.zero;
     }
 
     void Start()
     {
-        SelectInlet(selectedInlet);
         OnScoreChanged?.Invoke(score);
         OnMedalsChanged?.Invoke(medals);
     }
@@ -225,12 +231,24 @@ public class MedalPusherGame : MonoBehaviour
 
     private void SpawnMedal(GameObject prefab)
     {
-        Vector3 local = medalSpawnPoint != null ? transform.InverseTransformPoint(medalSpawnPoint.position)
-            : new Vector3(0f, medalSpawnHeight, 2f);
-        float scatter = medalInlets != null && medalInlets.Length > 0 ? Mathf.Clamp(inletScatter, 0f, .3f) : 3.25f;
-        local.x = Mathf.Clamp(local.x + Random.Range(-scatter, scatter), -3.5f, 3.5f);
-        local.z += Random.Range(-0.18f, 0.18f);
+        Vector3 local = CurrentMedalDropLocalPosition;
+        local.y = Mathf.Max(medalSpawnHeight, local.y + .8f);
+        // Keep the clicked X/Z exact. A tall pile only raises the release point
+        // so that new medals start outside the existing physical pieces.
+        Vector3 world = transform.TransformPoint(local);
+        foreach (MedalItem boardItem in boardItems)
+        {
+            if (boardItem == null || boardItem.collected) continue;
+            Collider occupied = boardItem.GetComponent<Collider>();
+            if (occupied == null || !occupied.enabled) continue;
+            Bounds bounds = occupied.bounds;
+            if (world.x + .4f < bounds.min.x || world.x - .4f > bounds.max.x
+                || world.z + .4f < bounds.min.z || world.z - .4f > bounds.max.z) continue;
+            float top = transform.InverseTransformPoint(new Vector3(world.x, bounds.max.y, world.z)).y;
+            local.y = Mathf.Max(local.y, top + .15f);
+        }
         GameObject medal = Instantiate(prefab, transform.TransformPoint(local), transform.rotation, itemsRoot);
+        medal.name = "InsertedMedal";
         MedalItem item = medal.GetComponent<MedalItem>();
         if (item == null) item = medal.AddComponent<MedalItem>();
         item.isPrize = false;
@@ -239,15 +257,88 @@ public class MedalPusherGame : MonoBehaviour
         Rigidbody body = medal.GetComponent<Rigidbody>();
         body.isKinematic = false;
         body.useGravity = true;
-        body.linearVelocity = transform.TransformDirection(new Vector3(Random.Range(-0.08f, 0.08f), -0.5f, -0.1f));
+        body.linearVelocity = transform.TransformDirection(new Vector3(0f, -.5f, 0f));
         RegisterItem(item);
+        LastInsertedMedal = medal;
+        OnPaidMedalSpawned?.Invoke(medal);
+    }
+
+    private void CacheMedalDropSurfaces()
+    {
+        medalDropSurfaces.Clear();
+        medalClickOpenings.Clear();
+        AddMedalDropSurface(pusherBody != null ? pusherBody.transform : transform.Find("PusherPlate"));
+        if (pusherBody != null)
+            medalClickOpenings.AddRange(pusherBody.GetComponentsInChildren<MedalSlotPocket>(true));
+        AddMedalDropSurface(sideHoleMainDeck);
+        if (sideHoleDeckStrips != null)
+            foreach (Transform strip in sideHoleDeckStrips) AddMedalDropSurface(strip);
+        Transform field = transform.Find("GeneratedPlayfield");
+        if (field != null) AddMedalDropSurface(field.Find("PusherBoard"));
+    }
+
+    private void AddMedalDropSurface(Transform surface)
+    {
+        if (surface == null) return;
+        foreach (Collider collider in surface.GetComponents<Collider>())
+            if (!medalDropSurfaces.Contains(collider)) medalDropSurfaces.Add(collider);
+    }
+
+    public bool TrySetMedalDropTarget(Camera camera, Vector2 screenPosition)
+    {
+        if (SettingsOpen || camera == null || !camera.pixelRect.Contains(screenPosition)) return false;
+        if (medalDropSurfaces.Count == 0) CacheMedalDropSurfaces();
+        Ray ray = camera.ScreenPointToRay(screenPosition);
+        Vector3 closestPoint = Vector3.zero;
+        Vector3 closestNormal = Vector3.zero;
+        float closestDistance = float.PositiveInfinity;
+        Collider closestCollider = null;
+        bool found = false;
+        foreach (Collider surface in medalDropSurfaces)
+        {
+            if (surface == null || !surface.enabled || !surface.gameObject.activeInHierarchy || surface.isTrigger) continue;
+            if (!surface.Raycast(ray, out RaycastHit hit, camera.farClipPlane)) continue;
+            if (hit.distance < closestDistance)
+            {
+                closestPoint = hit.point; closestNormal = hit.normal;
+                closestDistance = hit.distance; closestCollider = hit.collider; found = true;
+            }
+        }
+        // An opening has no top collider. Its mouth plane still describes the
+        // clicked release position, without filling the real physical hole.
+        foreach (MedalSlotPocket pocket in medalClickOpenings)
+        {
+            if (pocket == null || !pocket.isActiveAndEnabled) continue;
+            float radius = pocket.clickOpeningRadius;
+            if (float.IsNaN(radius) || float.IsInfinity(radius) || radius <= 0f) continue;
+            Vector3 normal = pocket.transform.up;
+            if (Vector3.Dot(ray.direction, normal) >= 0f) continue;
+            Plane mouth = new Plane(normal, pocket.transform.position);
+            if (!mouth.Raycast(ray, out float distance) || distance > camera.farClipPlane || distance >= closestDistance) continue;
+            Vector3 point = ray.GetPoint(distance);
+            Vector3 local = pocket.transform.InverseTransformPoint(point);
+            if (local.x * local.x + local.z * local.z >= radius * radius) continue;
+            closestPoint = point; closestNormal = normal;
+            closestDistance = distance; closestCollider = null; found = true;
+        }
+        // Only playing faces and the front side of the tilted mouths count.
+        if (!found || Vector3.Dot(closestNormal, transform.up) < .85f) return false;
+        foreach (RaycastHit obstacle in Physics.RaycastAll(ray, closestDistance + .001f,
+            Physics.AllLayers, QueryTriggerInteraction.Ignore))
+        {
+            if (obstacle.collider == closestCollider || medalDropSurfaces.Contains(obstacle.collider)) continue;
+            if (obstacle.collider.GetComponentInParent<MedalItem>() != null) continue;
+            return false;
+        }
+        CurrentMedalDropLocalPosition = transform.InverseTransformPoint(closestPoint);
+        return true;
     }
 
     public void SelectInlet(int index)
     {
-        if (medalInlets == null || medalInlets.Length == 0) return;
-        selectedInlet = Mathf.Clamp(index, 0, medalInlets.Length - 1);
-        if (medalInlets[selectedInlet] != null) medalSpawnPoint = medalInlets[selectedInlet];
+        // Kept for old scene/test callbacks. Paid drops use the last clicked
+        // board position; the former three inlet transforms no longer aim them.
+        selectedInlet = Mathf.Clamp(index, 0, 2);
         OnInletChanged?.Invoke(selectedInlet);
     }
 

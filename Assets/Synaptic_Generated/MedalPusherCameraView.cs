@@ -20,16 +20,17 @@ public class MedalPusherCameraView : MonoBehaviour
     {
         if (targetCamera == null) targetCamera = Camera.main;
         if (targetCamera == null) return;
+        MedalPusherUI.Instance?.RefreshVisibleTextMeshes();
         if (!overview && lotteryStation != null)
         {
             targetCamera.transform.position = lotteryStation.transform.TransformPoint(lotteryStation.isUpperStation
-                ? new Vector3(7.3f, 10.2f, -12.2f) : new Vector3(5.6f, 7.5f, -7.8f));
+                ? new Vector3(3f, 13f, -10.8f) : new Vector3(5.6f, 7.5f, -7.8f));
             targetCamera.transform.LookAt(lotteryStation.transform.TransformPoint(lotteryStation.isUpperStation
-                ? new Vector3(0, .7f, -3.5f) : new Vector3(0, .65f, -.3f)));
-            targetCamera.fieldOfView = lotteryStation.isUpperStation ? 47 : 43;
+                ? new Vector3(0, .4f, -2.7f) : new Vector3(0, .65f, -.3f)));
+            targetCamera.fieldOfView = 43;
             return;
         }
-        targetCamera.transform.position = overview ? new Vector3(24, 21, -29) : new Vector3(9.4f, 10.3f, -14.8f);
+        targetCamera.transform.position = overview ? new Vector3(24, 21, -29) : new Vector3(0f, 10.3f, -17.2f);
         targetCamera.transform.LookAt(overview ? new Vector3(0, 5.2f, 7) : new Vector3(0, .25f, -.5f));
         targetCamera.fieldOfView = overview ? 45 : 43;
     }

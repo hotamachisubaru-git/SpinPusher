@@ -34,6 +34,8 @@ public class MedalPusherUI : MonoBehaviour
     private float prizeTimer;
     private float comboTimer;
     private Coroutine jackpotRoutine;
+    private Coroutine textMeshRefreshRoutine;
+    private Vector2Int lastScreenSize;
 
     void Awake()
     {
@@ -48,29 +50,36 @@ public class MedalPusherUI : MonoBehaviour
         if (game != null)
         {
             game.OnMedalsChanged += UpdateMedals;
-            game.OnComboChanged += UpdateCombo;
             game.OnPrizeDropped += OnPrizeDropped;
             game.OnJackpot += OnJackpot;
         }
         HideScore();
         if (medalsLabel != null) medalsLabel.text = "メダル";
-        if (comboLabel != null) comboLabel.text = "連続獲得";
         UpdateMedals(game != null ? game.medals : 0);
         UpdateCombo(game != null ? game.comboCount : 0);
         if (prizeDisplay != null) prizeDisplay.text = "";
         if (prizeCanvas != null) prizeCanvas.enabled = false;
         if (jackpotPanel != null) jackpotPanel.SetActive(false);
-        StartCoroutine(RefreshTextMeshesAfterStartup());
+        RefreshVisibleTextMeshes();
     }
 
-    private IEnumerator RefreshTextMeshesAfterStartup()
+    public void RefreshVisibleTextMeshes()
     {
-        // Rebuild static captions after every component has applied its startup
-        // text and the dynamically populated Japanese font has initialized.
+        if (!isActiveAndEnabled) return;
+        if (textMeshRefreshRoutine != null) StopCoroutine(textMeshRefreshRoutine);
+        textMeshRefreshRoutine = StartCoroutine(RefreshTextMeshesAfterViewChange());
+    }
+
+    private IEnumerator RefreshTextMeshesAfterViewChange()
+    {
+        // Let newly visible world captions populate the shared Japanese atlas
+        // before rebuilding the overlay captions after a camera change.
         yield return null;
-        foreach (var text in GetComponentsInChildren<TMP_Text>())
+        yield return null;
+        foreach (var text in FindObjectsByType<TMP_Text>(FindObjectsSortMode.None))
             if (text.isActiveAndEnabled) text.ForceMeshUpdate(false, true);
         Canvas.ForceUpdateCanvases();
+        textMeshRefreshRoutine = null;
     }
 
     public void UpdateScore(int value)
@@ -95,13 +104,10 @@ public class MedalPusherUI : MonoBehaviour
 
     public void UpdateCombo(int value)
     {
-        if (comboText != null)
-        {
-            comboText.text = value > 0 ? value + "連続獲得！" : "";
-            comboText.color = comboColor;
-        }
-        if (comboPanel != null) comboPanel.SetActive(value > 0);
-        comboTimer = value > 0 ? Mathf.Max(0.1f, comboDisplayDuration) : 0f;
+        if (comboText != null) comboText.text = "";
+        if (comboLabel != null) comboLabel.text = "";
+        if (comboPanel != null) comboPanel.SetActive(false);
+        comboTimer = 0f;
     }
 
     public void UpdateComboUI(int value) { UpdateCombo(value); }
@@ -128,6 +134,9 @@ public class MedalPusherUI : MonoBehaviour
 
     void Update()
     {
+        var screenSize = new Vector2Int(Screen.width, Screen.height);
+        if (screenSize != lastScreenSize)
+        { lastScreenSize = screenSize; RefreshVisibleTextMeshes(); }
         if (prizeTimer > 0f)
         {
             prizeTimer -= Time.deltaTime;
@@ -142,6 +151,11 @@ public class MedalPusherUI : MonoBehaviour
             comboTimer -= Time.deltaTime;
             if (comboTimer <= 0f && comboPanel != null) comboPanel.SetActive(false);
         }
+    }
+
+    void OnRectTransformDimensionsChange()
+    {
+        if (game != null && isActiveAndEnabled) RefreshVisibleTextMeshes();
     }
 
     private IEnumerator HideJackpot()
@@ -173,7 +187,6 @@ public class MedalPusherUI : MonoBehaviour
         if (game != null)
         {
             game.OnMedalsChanged -= UpdateMedals;
-            game.OnComboChanged -= UpdateCombo;
             game.OnPrizeDropped -= OnPrizeDropped;
             game.OnJackpot -= OnJackpot;
         }

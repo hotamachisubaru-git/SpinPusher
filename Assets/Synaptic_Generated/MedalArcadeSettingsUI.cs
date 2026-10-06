@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 /// <summary>Validates the whole settings form before applying or saving any value.</summary>
 public sealed class MedalArcadeSettingsUI : MonoBehaviour
@@ -18,6 +19,8 @@ public sealed class MedalArcadeSettingsUI : MonoBehaviour
     public TMP_InputField sideHoleWidthInput;
     public TMP_Text feedbackText;
     public TMP_Text measuredPayoutText;
+    public Toggle showLotteryStatusToggle;
+    public MedalArcadeUI arcadeUI;
     public bool IsOpen => modal != null && modal.activeSelf;
 
     private void Start()
@@ -53,10 +56,12 @@ public sealed class MedalArcadeSettingsUI : MonoBehaviour
         SetInput(targetPayoutInput, Number(values.targetPayoutPercent));
         SetInput(slotBallChanceInput, Number(values.slotBallChancePercent));
         SetInput(slotMedalChanceInput, Number(values.slotMedalChancePercent));
-        SetInput(medalsPerSpinInput, values.medalsPerSpin.ToString(CultureInfo.InvariantCulture));
+        SetInput(medalsPerSpinInput, "1");
+        if (medalsPerSpinInput != null) medalsPerSpinInput.interactable = false;
         SetInput(slotSpinDurationInput, Number(values.slotSpinDuration));
         SetInput(rescueSpinsInput, values.rescueSpins.ToString(CultureInfo.InvariantCulture));
         SetInput(sideHoleWidthInput, Number(values.sideHoleWidth));
+        if (showLotteryStatusToggle != null) showLotteryStatusToggle.SetIsOnWithoutNotify(values.showLotteryStatus);
     }
 
     private static bool Integer(TMP_InputField input, out int value)
@@ -74,6 +79,7 @@ public sealed class MedalArcadeSettingsUI : MonoBehaviour
         if (settings.IsBusy)
         { SetFeedback("抽選中は変更できません。抽選終了後に適用してください。", true); return; }
         var values = new MedalArcadeSettings.Values();
+        values.showLotteryStatus = showLotteryStatusToggle != null ? showLotteryStatusToggle.isOn : settings.showLotteryStatus;
         if (jackpotInputs == null || jackpotInputs.Length != 3 ||
             !Integer(jackpotInputs[0], out values.jackpotResetValues[0]) ||
             !Integer(jackpotInputs[1], out values.jackpotResetValues[1]) ||
@@ -91,11 +97,29 @@ public sealed class MedalArcadeSettingsUI : MonoBehaviour
         try
         {
             settings.ApplyToGame(true);
+            RefreshLotteryStatus();
             if (settings.Save()) SetFeedback(settings.persistSettings ? "設定を適用して保存しました。JACKPOTの現在枚数も更新しました。" : "設定を適用しました。JACKPOTの現在枚数も更新しました。", false);
             else SetFeedback(settings.LastError, true);
             Populate(); UpdateMeasuredPayout();
         }
         catch (Exception) { SetFeedback("設定を適用できませんでした。抽選終了後に再度お試しください。", true); }
+    }
+
+    /// <summary>Changes presentation only; numeric settings remain locked during active lotteries.</summary>
+    public void SetLotteryStatusVisibility(bool visible)
+    {
+        if (settings == null) settings = FindAnyObjectByType<MedalArcadeSettings>();
+        if (settings == null) { SetFeedback("設定対象のゲームが見つかりません。", true); return; }
+        settings.showLotteryStatus = visible;
+        RefreshLotteryStatus();
+        if (settings.Save()) SetFeedback(visible ? "抽選案内を表示しました。" : "抽選案内を非表示にしました。", false);
+        else SetFeedback(settings.LastError, true);
+    }
+
+    private void RefreshLotteryStatus()
+    {
+        if (arcadeUI == null) arcadeUI = FindAnyObjectByType<MedalArcadeUI>();
+        if (arcadeUI != null) { arcadeUI.settings = settings; arcadeUI.Refresh(); }
     }
 
     private void SetFeedback(string message, bool error)

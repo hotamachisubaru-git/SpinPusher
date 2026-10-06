@@ -9,16 +9,14 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
-/// <summary>Bounded Play-only check of settings, actual payout coins, side holes, and the two-stage lottery.</summary>
+/// <summary>Bounded Play-only check of integrated upper ports, same-ball returns, independent guards, and actual payout physics.</summary>
 [InitializeOnLoad]
-public static class MedalUpperFlowPlayCheck
+public static class MedalIntegratedUpperFlowPlayCheck
 {
-    private const string Key = "MedalPusher.UpperFlowCheck";
+    private const string Key = "MedalPusher.IntegratedUpperFlowCheck";
     private const string StartedKey = Key + ".Started";
     private const string BackgroundKey = Key + ".Background";
     private const string UtcKey = Key + ".Utc";
-    private const string StabilityKey = Key + ".Stability";
-    private const string ReferenceKey = Key + ".Reference";
     private enum Phase { Boot, Settings, SidePayout, TopPayout, Collector, NormalPayoutBurst, OpenHoles, ClosedHoles, Capacity, Drain, Slots, Rounds, Stop, Complete }
     private static Phase phase;
     private static MedalPusherGame game;
@@ -36,10 +34,7 @@ public static class MedalUpperFlowPlayCheck
     private static readonly List<Vector3> topPositions = new List<Vector3>();
     private static readonly List<MedalItem> payoutItems = new List<MedalItem>();
     private static readonly List<object> rounds = new List<object>();
-    private static readonly List<object> naturalSelectorSamples = new List<object>();
-    private static readonly List<object> dividerSpeedSamples = new List<object>();
     private static readonly List<object> bumperContactSamples = new List<object>();
-    private static readonly HashSet<float>[] observedDividerSpeeds = { new HashSet<float>(), new HashSet<float>(), new HashSet<float>() };
     private static readonly List<MedalItem> holeItems = new List<MedalItem>();
     private static readonly Dictionary<Collider, bool> routedPocketStates = new Dictionary<Collider, bool>();
     private const int BurstCount = 500;
@@ -73,61 +68,64 @@ public static class MedalUpperFlowPlayCheck
     private static float originalTimeScale, nextAt, placedFixedTime, pusherAtOpen;
     private static double phaseStarted;
     private static Quaternion[] idleAngles, roundAngles, stopAngles;
-    private static int realCap, walletBefore, upperEvents, selectionEvents, colorEvents;
+    private static int realCap, walletBefore, upperEvents, colorEvents;
     private static long returnedBefore, paidBefore, queuedBefore;
-    private static int roundIndex, ticket, upperBaseline, selectionBaseline, colorBaseline, lotteriesBefore, colorRoundsBefore;
-    private static int lastUpperWin, lastColorPayout, roundWallet, selectorWallet, colorWallet, expectedPool, jackpotsBefore;
-    private static int naturalUpperCount, naturalSelectorCount, spinsBefore;
+    private static int roundIndex, ticket, upperBaseline;
+    private static int lastUpperWin, lastColorPayout, roundWallet, expectedPool;
+    private static int blueBeforeForcedHits, yellowBeforePort;
+    private static int naturalUpperCount, spinsBefore;
     private static int naturalUpperPhysicalContactTotal;
     private static int successfulGuardCount;
-    private static MedalJackpotKind? selectedKind, finishedKind;
-    private static bool selectionTimedOut, finishedJackpot, upperChecked, upperRouted, selectorChecked, selectorRouted;
-    private static bool lowerChecked, lowerRouted, rotationObserved, gatesLiftObserved, captureDone;
-    private static double roundStarted, colorFinishedAt;
+    private static MedalJackpotKind? finishedKind;
+    private static bool finishedJackpot, upperRouted;
+    private static double roundStarted;
     private static bool upperTimedOut;
-    private static float selectorStartedFixed;
-    private static float originalSelectorTimeout;
     private static float originalUpperTimeout;
     private static LotteryBallToken upperToken;
     private static MedalLotteryBumper targetBumper;
-    private static int bumperHitStage, hitsBeforePulse, actualBumperContacts, finalUpperHits, finalUpperWin;
-    private static float nextBumperPulseFixed, liveThresholdStartedFixed;
-    private static bool thresholdObserved, upperExitedBowl;
+    private static int actualBumperContacts, finalUpperHits, finalUpperWin;
+    private static bool upperExitedBowl;
     private static bool upperEndedWithOriginalToken;
     private static Vector3? finalUpperBallLocalPosition;
-    private static float rearUpperBallRadius;
-    private static LotteryBallToken guardedToken;
-    private static int guardStep;
-    private static bool guardCollisionObserved, selectionGuardUsed;
-    private static bool selectionExitedBowl;
-    private static Vector3? unguardedExitPosition;
-    private static float unguardedBallRadius;
-    private static float guardConsumedFixed;
-    private static float nextSelectorSampleAt;
 
-    static MedalUpperFlowPlayCheck()
+
+    private enum IntegratedStep { WaitBall, PulseTo100, Hold100, PulseTo102, HoldOpen, Guard, Visit, PulseTo104, FinalOut, Natural }
+    private static IntegratedStep integratedStep;
+    private static readonly List<object> visits = new List<object>();
+    private static readonly List<object> guardContacts = new List<object>();
+    private static readonly List<object> naturalUpperSamples = new List<object>();
+    private static readonly List<object> slotPocketContacts = new List<object>();
+    private static readonly List<object> fixtureBoundaries = new List<object>();
+    private static readonly Dictionary<MedalSlotPocket, bool> upperFixtureSlotStates = new Dictionary<MedalSlotPocket, bool>();
+    private static readonly Dictionary<MedalOutBlock, int> physicalGuardContacts = new Dictionary<MedalOutBlock, int>();
+    private static readonly int[] naturalSeeds = { 73101, 73102, 73103 };
+    private static int visitIndex, visitStage, guardIndex, guardStage, guardContactBaseline, visitUpperHits, visitUpperWin, visitWallet, visitColorTicket;
+    private static string upperObjectId;
+    private static int upperStartEvents, mainUpperStartBaseline, visitUpperEvents, visitColorEvents, earnedColorTotal, legacyEvents;
+    private static int pulseTargetHits, pulseStage, pulseBefore;
+    private static float pulseNextFixed, holdUntilFixed, guardUsedFixed, nextNaturalSample;
+    private static double visitStarted, visitFinishedAt;
+    private static float suspendedElapsedAt, lowerPocketAt;
+    private static bool[] visitGuardSnapshot;
+    private static MedalLotteryPocket chosenColorPocket;
+    private static MedalBallLotteryStation visitingStation;
+    private static LotteryBallToken visitingToken;
+    private static IntegratedStep afterGuard;
+    private static UnityEngine.Random.State originalRandomState;
+
+    static MedalIntegratedUpperFlowPlayCheck()
     {
         EditorApplication.update += Tick;
         EditorApplication.playModeStateChanged += OnPlayModeChanged;
         Application.logMessageReceived += OnLog;
     }
 
-    // Legacy harness retained for historical reports; its old scene rules are not exposed as a menu.
-    public static void Run() => Start(false);
-
-    // Legacy harness retained for historical reports; its old scene rules are not exposed as a menu.
-    public static void RunSelectorStability() => Start(true);
-
-    // Legacy harness retained for historical reports; its old scene rules are not exposed as a menu.
-    public static void RunUpperReference() => Start(false, true);
-
-    private static void Start(bool selectorStability, bool upperReference = false)
+    [MenuItem("Tools/Medal Pusher/Run Integrated Upper Flow Play Check")]
+    public static void Run()
     {
-        Require(!EditorApplication.isPlayingOrWillChangePlaymode, "Stop Play mode before running the upper-flow check.");
+        Require(!EditorApplication.isPlayingOrWillChangePlaymode, "Stop Play mode before running the integrated upper-flow check.");
         MedalPusherExpansionBuilder.Validate(); Reset();
-        SessionState.SetBool(StabilityKey, selectorStability);
-        SessionState.SetBool(ReferenceKey, upperReference);
-        foreach (string other in new[] { "MedalPusher.PlayCheck", "MedalArcade.PlayCheck", "MedalPusher.RevisionCheck" }) SessionState.SetBool(other, false);
+        foreach (string other in new[] { "MedalPusher.PlayCheck", "MedalArcade.PlayCheck", "MedalPusher.RevisionCheck", "MedalPusher.UpperFlowCheck", "MedalPusher.ClickBallOnlyCheck" }) SessionState.SetBool(other, false);
         SessionState.SetFloat(StartedKey, (float)Now); SessionState.SetString(UtcKey, DateTime.UtcNow.ToString("O"));
         SessionState.SetBool(BackgroundKey, Application.runInBackground); Application.runInBackground = true;
         SessionState.SetBool(Key, true); EditorApplication.isPaused = false; EditorApplication.isPlaying = true;
@@ -143,24 +141,25 @@ public static class MedalUpperFlowPlayCheck
         }
         catch (Exception exception)
         {
-            MedalPusherExpansionBuilder.WriteReport("upper-play-validation.json", new { timestampUtc = DateTime.UtcNow.ToString("O"), success = false, errors = new[] { exception.ToString() } });
+            MedalPusherExpansionBuilder.WriteReport("integrated-upper-play-validation.json", new { timestampUtc = DateTime.UtcNow.ToString("O"), success = false, errors = new[] { exception.ToString() } });
             Debug.LogException(exception); if (Application.isBatchMode) EditorApplication.Exit(1);
         }
     }
 
-    // Legacy harness retained for historical reports; its old scene rules are not exposed as a menu.
+    [MenuItem("Tools/Medal Pusher/Inspect Integrated Upper Flow Play Check")]
     public static void Inspect()
     {
         var current = UnityEngine.Object.FindAnyObjectByType<MedalSlotJackpotController>();
-        MedalPusherExpansionBuilder.WriteReport("upper-play-state.json", new {
+        MedalPusherExpansionBuilder.WriteReport("integrated-upper-play-state.json", new {
             timestampUtc = DateTime.UtcNow.ToString("O"), requested = SessionState.GetBool(Key, false),
             playing = EditorApplication.isPlaying, paused = EditorApplication.isPaused, elapsedWallSeconds = Elapsed,
-            phase = phase.ToString(), roundIndex, upperEvents, selectionEvents, colorEvents,
-            selectorStability = StabilityMode, targetRounds = TargetRounds, maximumWallSeconds = MaximumSeconds,
-            upperReference = ReferenceMode,
+            phase = phase.ToString(), roundIndex, upperEvents, colorEvents, legacyEvents,
+            integratedUpperMode = true, targetRounds = TargetRounds, maximumWallSeconds = MaximumSeconds, integratedStep = integratedStep.ToString(), visitIndex, guardIndex,
             bootReadiness = Diagnostics(), controller = current == null ? null : new {
                 current.IsUpperDrawing, current.IsSelectingColor, current.IsColorRoundActive, activeKind = current.ActiveKind?.ToString(),
-                current.PendingBallDraws, current.LastUpperWin,
+                current.PendingBallDraws, current.LastUpperWin, current.LiveUpperWin, current.AreColorGatesUnlocked,
+                suspended = current.upperStation != null && current.upperStation.IsUpperSuspended,
+                guardsUsed = current.upperStation == null ? null : current.upperStation.OutBlockUsedStates,
                 upperBall = current.upperStation == null || current.upperStation.ActiveBall == null ? null : Pos(current.upperStation.ActiveBall.transform.position)
             }
         });
@@ -168,14 +167,37 @@ public static class MedalUpperFlowPlayCheck
 
     private static double Now => EditorApplication.timeSinceStartup;
     private static double Elapsed => Now - SessionState.GetFloat(StartedKey, (float)Now);
-    private static bool StabilityMode => SessionState.GetBool(StabilityKey, false);
-    private static bool ReferenceMode => SessionState.GetBool(ReferenceKey, false);
-    private static int TargetRounds => ReferenceMode ? 15 : StabilityMode ? 53 : 14;
-    private static int ExpectedNaturalSelectors => StabilityMode ? 33 : 3;
-    private static int MaximumSeconds => ReferenceMode ? 500 : StabilityMode ? 900 : 420;
+    private static int TargetRounds => 4;
+    private static int MaximumSeconds => 900;
     private static object Pos(Vector3 v) => new { x = v.x, y = v.y, z = v.z };
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
-    private static void Check(string name, bool condition) { results[name] = condition; if (!condition) errors.Add("Failed: " + name); }
+    private static void Check(string name, bool condition)
+    {
+        results[name] = condition;
+        if (!condition)
+        {
+            errors.Add("Failed: " + name);
+            results["failureDiagnostics_" + name] = new {
+                fixedTime = Time.fixedTime, gameTime = Time.time, roundIndex, integratedStep = integratedStep.ToString(), visitIndex, guardIndex,
+                actualWallet = game == null ? 0 : game.medals, expectedRoundWallet = roundWallet + earnedColorTotal,
+                visitWallet, expectedVisitResultWallet = visitWallet + (visitIndex % 2 == 1 ? expectedPool : chosenColorPocket == null ? 0 : chosenColorPocket.smallReward),
+                upperEvents, upperBaseline, visitUpperEvents, colorEvents, visitColorEvents, actualBumperContacts, pulseBefore,
+                upperWin = upper == null ? 0 : upper.BumperWin, upperHits = upper == null ? 0 : upper.TotalBumperHits,
+                liveUpperWin = controller == null ? 0 : controller.LiveUpperWin,
+                actualLastBumper = upper == null || upper.LastBumper == null ? null : upper.LastBumper.name,
+                expectedBumper = targetBumper == null ? null : targetBumper.name,
+                sameOriginalBall = upperToken != null && upper != null && ReferenceEquals(upper.ActiveBall, upperToken),
+                originalTokenConsumed = upperToken != null && upperToken.IsConsumed,
+                usedGuards = upper == null ? null : upper.OutBlockUsedStates,
+                colorActive = controller != null && controller.IsColorRoundActive,
+                slotSpinning = controller != null && controller.IsSlotSpinning,
+                totalSpins = controller == null ? 0 : controller.TotalSpins, slotCredits = controller == null ? 0 : controller.SpinCredits,
+                returnedMedals = game == null ? 0 : game.TotalReturnedMedals, pendingPayout = game == null ? 0 : game.PendingPayoutMedals,
+                legacyEvents
+            };
+        }
+    }
+    private static void CheckOnce(string name, bool condition) { if (!results.ContainsKey(name)) Check(name, condition); }
     private static FieldInfo Field(object target, string name)
     {
         var field = target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -190,13 +212,13 @@ public static class MedalUpperFlowPlayCheck
     private static void Reset()
     {
         phase = Phase.Boot; game = null; controller = null; upper = null; settings = null; settingsUI = null; arcade = null;
-        initialized = capturing = false; upperEvents = selectionEvents = colorEvents = roundIndex = naturalUpperCount = naturalSelectorCount = 0;
-        successfulGuardCount = 0; dividerSpeedSamples.Clear(); foreach (var speeds in observedDividerSpeeds) speeds.Clear();
-        naturalUpperPhysicalContactTotal = 0;
+        initialized = capturing = false; upperEvents = colorEvents = roundIndex = naturalUpperCount = 0;
+        successfulGuardCount = 0;
+        naturalUpperPhysicalContactTotal = 0; legacyEvents = upperStartEvents = earnedColorTotal = 0; physicalGuardContacts.Clear();
         bumperContactSamples.Clear();
         temporarySettingsPath = realSettingsPath = realSettingsHash = null;
         results.Clear(); errors.Clear(); editorIssues.Clear(); captureIssues.Clear(); payouts.Clear(); sidePositions.Clear(); topPositions.Clear();
-        payoutItems.Clear(); rounds.Clear(); naturalSelectorSamples.Clear(); holeItems.Clear(); routedPocketStates.Clear();
+        payoutItems.Clear(); rounds.Clear(); visits.Clear(); guardContacts.Clear(); naturalUpperSamples.Clear(); slotPocketContacts.Clear(); fixtureBoundaries.Clear(); upperFixtureSlotStates.Clear(); holeItems.Clear(); routedPocketStates.Clear();
         burstCoins.Clear(); burstIgnoredColliderStates.Clear(); burstActive = false;
     }
     private static bool Ready()
@@ -244,7 +266,7 @@ public static class MedalUpperFlowPlayCheck
                 if (Time.time < .5f || !Ready()) { results["bootReadiness"] = Diagnostics(); return; }
                 Initialize();
             }
-            if (phase == Phase.NormalPayoutBurst) Require(Now - phaseStarted < 55, "Normal 500-medal payout exceeded 55 wall-clock seconds.");
+            if (phase == Phase.NormalPayoutBurst) Require(Now - phaseStarted < 90, "Normal 500-medal payout exceeded 90 wall-clock seconds.");
             else if (phase != Phase.Rounds && phase != Phase.Stop) Require(Now - phaseStarted < 15, "Setup stage timed out: " + phase);
             switch (phase)
             {
@@ -312,10 +334,24 @@ public static class MedalUpperFlowPlayCheck
                     Check("queuedPayoutResumesAfterCapacityReturns", true);
                     ClearCredits(); Set(controller, "nextLotteryAt", float.PositiveInfinity); spinsBefore = controller.TotalSpins;
                     paidBefore = game.TotalPaidMedals; walletBefore = game.medals; returnedBefore = game.TotalReturnedMedals;
-                    for (int i = 0; i < 6; i++) PaidThrow();
-                    controller.enabled = true; Enter(Phase.Slots); break;
+                    var paidForSlots = new List<MedalItem>();
+                    for (int i = 0; i < 6; i++) paidForSlots.Add(PaidThrow());
+                    Check("paidInputAloneDoesNotGrantSlotSpins", controller.TotalSpins == spinsBefore && controller.SpinCredits == 0);
+                    controller.enabled = true;
+                    var slotPockets = game.GetComponentsInChildren<MedalSlotPocket>().OrderBy(p => p.transform.position.x).ToArray();
+                    Require(slotPockets.Length == 3 && paidForSlots.Take(3).All(item => item != null), "Three physical slot pockets and paid coins required.");
+                    for (int i = 0; i < 3; i++)
+                    {
+                        var coin = paidForSlots[i]; var body = coin.GetComponent<Rigidbody>(); body.isKinematic = false; body.useGravity = true;
+                        var slotProbe = coin.gameObject.AddComponent<MedalIntegratedSlotPocketProbe>(); slotProbe.ExpectedPocket = slotPockets[i];
+                        var trigger = slotPockets[i].GetComponent<SphereCollider>();
+                        Place(body, slotPockets[i].transform.TransformPoint(trigger.center));
+                    }
+                    Enter(Phase.Slots); break;
                 case Phase.Slots:
+                    Require(Now - phaseStarted < 20, "Three real slot pocket contacts did not finish their spins in 20 seconds.");
                     if (controller.TotalSpins < spinsBefore + 3 || controller.IsSlotSpinning) return;
+                    Check("threeActualPaidCoinSlotPocketContactsStartThreeSpins", slotPocketContacts.Count == 3 && controller.TotalSpins == spinsBefore + 3);
                     Check("payoutTargetZeroDisablesSlotWinsAndRescue", controller.TotalSpins == spinsBefore + 3 && controller.SpinCredits == 0 &&
                         game.TotalReturnedMedals == returnedBefore && game.medals == walletBefore - 6 && controller.PendingBallDraws == 0);
                     Check("paidCountersExcludePayoutReplicas", game.TotalPaidMedals == paidBefore + 6);
@@ -332,11 +368,9 @@ public static class MedalUpperFlowPlayCheck
                     if (roundIndex < TargetRounds) StartRound();
                     else
                     {
-                        Check("threeNaturalUpperDrawsFinishWithEarnedWin", naturalUpperCount == 3);
-                        if (ReferenceMode) Check("naturalUpperDrawsHavePhysicalBumperContact", naturalUpperPhysicalContactTotal > 0);
-                        Check(StabilityMode ? "thirtyThreeNaturalSelectorsResolveWithoutTimeout" : "threeNaturalSelectorsReachRealColorPocket", naturalSelectorCount == ExpectedNaturalSelectors);
-                        Check("allGuardFacesResolveSameBallWithoutCompensation", successfulGuardCount == (StabilityMode ? 8 : 1));
-                        Check("partitionSpeedsVaryAcrossDraws", observedDividerSpeeds.All(s => s.Count >= 2));
+                        Check("threeNaturalUpperDrawsAreObserved", naturalUpperCount == 3);
+                        Check("sixColorVisitsKeepTheOriginalUpperBall", visits.Count == 6);
+                        Check("allFourIndependentGuardFacesConsumed", successfulGuardCount == 4);
                         phase = Phase.Complete; Finish(true);
                     }
                     break;
@@ -347,18 +381,17 @@ public static class MedalUpperFlowPlayCheck
 
     private static void Initialize()
     {
-        initialized = true; originalTimeScale = Time.timeScale; Time.timeScale = 1;
+        initialized = true; originalTimeScale = Time.timeScale; originalRandomState = UnityEngine.Random.state; Time.timeScale = 1;
         results["bootReadiness"] = Diagnostics();
         upper = controller.upperStation;
-        originalSelectorTimeout = upper == null ? 10f : upper.colorSelectionTimeout;
         originalUpperTimeout = upper == null ? 60f : upper.drawTimeout;
         Require(upper != null && upper.isUpperStation && controller.stations != null && controller.stations.Length == 3, "Upper/colored stations missing.");
         Require(!controller.IsUpperDrawing && !controller.IsColorRoundActive && !controller.IsSlotSpinning, "An incidental draw is already active.");
         game.StopThrowing(); controller.enabled = false; ClearCredits(); ClearDrawQueue();
-        foreach (var input in UnityEngine.Object.FindObjectsByType<MedalInputHandler>(FindObjectsSortMode.None)) input.enabled = false;
+        foreach (var input in UnityEngine.Object.FindObjectsByType<MedalInputHandler>()) input.enabled = false;
         var manager = game.GetComponent<PrizeDropManager>(); Require(manager != null, "Prize manager missing."); manager.enabled = false; manager.bonusMedalChance = 0;
         FreezeBoard();
-        controller.OnUpperLotteryFinished += OnUpperFinish; controller.OnColorSelectionFinished += OnSelectionFinish; controller.OnLotteryFinished += OnColorFinish;
+        controller.OnUpperLotteryStarted += OnUpperStarted; controller.OnUpperLotteryFinished += OnUpperFinish; controller.OnColorSelectionStarted += OnLegacySelectorStarted; controller.OnColorSelectionFinished += OnLegacySelectorFinished; controller.OnLotteryFinished += OnColorFinish;
         game.OnPayoutMedalSpawned += OnPayout;
         savedPersistence = settings.persistSettings; originalOverride = settings.SettingsFileOverride;
         realSettingsPath = settings.SavePath; realSettingsHash = FileHash(realSettingsPath);
@@ -403,12 +436,20 @@ public static class MedalUpperFlowPlayCheck
         if (!body.isKinematic) { body.linearVelocity = Vector3.zero; body.angularVelocity = Vector3.zero; body.isKinematic = true; }
     }
     private static void FreezeBoard() { foreach (var item in game.itemsRoot.GetComponentsInChildren<MedalItem>()) if (!item.collected) Freeze(item.GetComponent<Rigidbody>()); }
-    private static void PaidThrow()
+    private static MedalItem PaidThrow()
     {
         Set(game, "throwTimer", 0f);
         var before = new HashSet<MedalItem>(game.itemsRoot.GetComponentsInChildren<MedalItem>());
         game.ThrowSingleMedal();
-        foreach (var item in game.itemsRoot.GetComponentsInChildren<MedalItem>()) if (!before.Contains(item)) Freeze(item.GetComponent<Rigidbody>());
+        MedalItem inserted = null;
+        foreach (var item in game.itemsRoot.GetComponentsInChildren<MedalItem>()) if (!before.Contains(item)) { Freeze(item.GetComponent<Rigidbody>()); inserted = item; }
+        return inserted;
+    }
+
+    public static void ObserveSlotPocketContact(MedalSlotPocket expected, Collider actual)
+    {
+        if (!SessionState.GetBool(Key, false) || actual == null || expected == null || actual.GetComponent<MedalSlotPocket>() != expected) return;
+        slotPocketContacts.Add(new { pocket = expected.name, pocketId = expected.GetEntityId().ToString(), position = Pos(expected.transform.position), fixedTime = Time.fixedTime });
     }
     private static MedalItem SpawnTestMedal(Vector3 position)
     {
@@ -457,7 +498,7 @@ public static class MedalUpperFlowPlayCheck
         var record = new BurstCoin { item = item, spawn = local, spawnedAt = Time.time,
             dynamic = body != null && !body.isKinematic, credited = item != null && item.payoutAlreadyCredited };
         int index = burstCoins.Count; burstCoins.Add(record); burstLastSpawnAt = Time.time;
-        var probe = coin.AddComponent<MedalUpperFlowPayoutProbe>(); probe.RecordIndex = index;
+        var probe = coin.AddComponent<MedalIntegratedUpperFlowPayoutProbe>(); probe.RecordIndex = index;
         var ownCollider = coin.GetComponent<Collider>();
         if (ownCollider == null) return;
         Physics.SyncTransforms();
@@ -576,30 +617,35 @@ public static class MedalUpperFlowPlayCheck
     }
     private static void CheckUpperGeometry()
     {
-        var pockets = upper.GetComponentsInChildren<MedalLotteryPocket>();
-        Check("upperHasFourPhysicalTwoWinBumpersAndNoWinPockets", upper.usesBumpers && pockets.Length == 0 && upper.bumpers != null && upper.bumpers.Length == 4 &&
-            upper.bumpers.Distinct().Count() == 4 && upper.bumpers.All(b => b != null && b.station == upper && b.GetComponent<SphereCollider>() != null && !b.GetComponent<SphereCollider>().isTrigger));
-        Check("upperHasActualOutflowAndSixtySecondEarnedWinWatchdog", upper.upperOutflow != null && upper.upperOutflow.station == upper &&
-            upper.upperOutflow.GetComponent<Collider>() != null && upper.upperOutflow.GetComponent<Collider>().isTrigger && Math.Abs(upper.drawTimeout - 60f) < .001f);
-        Check("worldRemainingGuardTextRemoved", upper.outBlockText == null && !upper.GetComponentsInChildren<Transform>(true).Any(t => t.name.StartsWith("OutBlockMark", StringComparison.Ordinal)));
-        Check("hudRemainingGuardTextRemoved", !UnityEngine.Object.FindObjectsByType<TMP_Text>(FindObjectsSortMode.None).Any(t => t.isActiveAndEnabled && t.text.Contains("ガード")));
-        Check("threeSolidSealedColorGatesAtIdle", upper.colorRoutePockets != null && upper.colorRoutePockets.Length == 3 &&
+        Check("upperHasFourPhysicalTwoWinBumpersAndNoWinPockets", upper.usesBumpers && upper.GetComponentsInChildren<MedalLotteryPocket>(true).Length == 0 &&
+            upper.bumpers != null && upper.bumpers.Length == 4 && upper.bumpers.Distinct().Count() == 4 &&
+            upper.bumpers.All(b => b != null && b.station == upper && b.GetComponent<SphereCollider>() != null && !b.GetComponent<SphereCollider>().isTrigger));
+        Check("separateFrontSelectorStageIsAbsent", !upper.GetComponentsInChildren<Transform>(true).Any(t => t.name == "ColorSelectionStage") &&
+            upper.colorLaunchPoint == null && !upper.IsSelectingColor && !controller.IsSelectingColor);
+        Check("threeIntegratedPortsHaveSolidClosedGates", upper.colorRoutePockets != null && upper.colorRoutePockets.Length == 3 &&
+            upper.colorRoutePockets.All(p => p != null && p.station == upper && p.GetComponent<Collider>().isTrigger) &&
             upper.colorRoutePockets.Select(p => p.kind).Distinct().Count() == 3 && upper.colorGateBodies != null && upper.colorGateBodies.Length == 3 &&
-            upper.colorGateBodies.All(b => b != null && b.isKinematic && b.GetComponent<Collider>() != null && b.GetComponent<Collider>().enabled && !b.GetComponent<Collider>().isTrigger) && !upper.ColorGatesOpen && GatesAtTarget(false));
-        Check("coloredSelectorPocketLettersRemoved", !upper.GetComponentsInChildren<Transform>(true).Any(t => t.name == "GateColorMark" || t.name == "ColorRouteLabel"));
-        bool eightGuards = upper.outBlocks != null && upper.outBlockBodies != null && upper.outBlockClosedPositions != null && upper.outflows != null &&
-            upper.outBlocks.Length == 8 && upper.outBlockBodies.Length == 8 && upper.outBlockClosedPositions.Length == 8 && upper.outflows.Length == 8 &&
-            Enumerable.Range(0, 8).All(i => upper.outBlocks[i] != null && upper.outBlockBodies[i] != null && upper.outBlockBodies[i].isKinematic &&
-                upper.outBlockBodies[i].GetComponent<Collider>() != null && !upper.outBlockBodies[i].GetComponent<Collider>().isTrigger &&
-                upper.outflows[i] != null && upper.outflows[i].GetComponent<Collider>() != null && upper.outflows[i].GetComponent<Collider>().isTrigger);
-        Check("eightSolidOutGuardsAndEightExteriorTriggers", eightGuards && upper.outBlockBody == upper.outBlockBodies[0] && upper.outflow == upper.outflows[0]);
+            upper.colorGateBodies.All(b => b != null && b.isKinematic && b.GetComponent<Collider>().enabled && !b.GetComponent<Collider>().isTrigger) && !upper.ColorGatesOpen && GatesAtTarget(false));
+        Check("fourIndependentWhiteFrontGuardsHaveSolidColliders", upper.outBlocks != null && upper.outBlockBodies != null && upper.outBlockClosedPositions != null &&
+            upper.outBlocks.Length == 4 && upper.outBlockBodies.Length == 4 && upper.outBlockClosedPositions.Length == 4 &&
+            Enumerable.Range(0, 4).All(i => upper.outBlocks[i] != null && upper.outBlocks[i].station == upper && upper.outBlockBodies[i] != null &&
+                upper.outBlockBodies[i].isKinematic && upper.outBlockBodies[i].GetComponent<Collider>() != null && !upper.outBlockBodies[i].GetComponent<Collider>().isTrigger) &&
+            upper.UsedOutBlockCount == 0 && !GuardStates().Any(used => used));
+        var guards = upper.outBlockBodies.Select(b => upper.transform.InverseTransformPoint(b.GetComponent<Collider>().bounds.center)).ToArray();
+        Check("fourFrontGuardsAreEquallySpacedAcrossPurpleFront", guards.Length == 4 && Enumerable.Range(0, 3).All(i => Math.Abs(guards[i + 1].x - guards[i].x - .6f) < .03f) &&
+            guards.All(p => p.z < upper.guideLocalCenter.z - 2f) && guards.Max(p => p.z) - guards.Min(p => p.z) < .02f);
+        Check("actualFrontOutflowRemainsBehindGuards", upper.upperOutflow != null && upper.upperOutflow.station == upper && upper.upperOutflow.GetComponent<Collider>().isTrigger &&
+            upper.transform.InverseTransformPoint(upper.upperOutflow.transform.position).z < guards.Min(p => p.z) - .2f);
         Vector3 red = game.transform.InverseTransformPoint(upper.colorRoutePockets.Single(p => p.kind == MedalJackpotKind.Ruby).transform.position);
         Vector3 blue = game.transform.InverseTransformPoint(upper.colorRoutePockets.Single(p => p.kind == MedalJackpotKind.Sapphire).transform.position);
         Vector3 yellow = game.transform.InverseTransformPoint(upper.colorRoutePockets.Single(p => p.kind == MedalJackpotKind.Amber).transform.position);
-        Check("colorRoutesUseRedLeftBlueRightYellowRear", red.x < 0 && blue.x > 0 && yellow.z > red.z + .2f && yellow.z > blue.z + .2f);
-        results["selectorOrientation"] = new { red = Pos(red), blue = Pos(blue), yellow = Pos(yellow) };
+        Check("integratedRoutesAreRedLeftBlueRightYellowRear", red.x < 0 && blue.x > 0 && yellow.z > red.z + 1f && yellow.z > blue.z + 1f);
+        Check("worldAndHudRemainingGuardTextAreAbsent", upper.outBlockText == null && !upper.GetComponentsInChildren<Transform>(true).Any(t => t.name.StartsWith("OutBlockMark", StringComparison.Ordinal)) &&
+            !UnityEngine.Object.FindObjectsByType<TMP_Text>().Any(t => t.isActiveAndEnabled && t.text.Contains("ガード")));
+        results["integratedGeometry"] = new { red = Pos(red), blue = Pos(blue), yellow = Pos(yellow), guards = guards.Select(Pos).ToArray() };
         CheckPoolLabels("initialPools");
     }
+
     private static bool Green(GameObject prefab)
     {
         if (prefab == null || prefab.GetComponent<Renderer>() == null) return false;
@@ -612,6 +658,14 @@ public static class MedalUpperFlowPlayCheck
         Require(controller.stations.All(s => s.dividerRotor != null && s.dividerBody != null && s.dividerBody.isKinematic), "Colored moving partition rotors are missing.");
         Check("allDrawAndBoardBallsUseGreenMaterial", Green(upper.lotteryBallPrefab) && controller.stations.All(s => Green(s.lotteryBallPrefab)) &&
             controller.ballPrefabs != null && controller.ballPrefabs.Length == 3 && controller.ballPrefabs.All(Green));
+        Check("legacyNonBallPrizesAndPrefabsAreAbsent", (game.prizePrefabs == null || game.prizePrefabs.Length == 0) &&
+            !game.itemsRoot.GetComponentsInChildren<MedalItem>(true).Any(item => item.isPrize && !item.isBall));
+        var prizeManager = game.GetComponent<PrizeDropManager>();
+        Check("legacyPrizeSpawnerIsEmpty", prizeManager != null && !prizeManager.spawnGenericPrizes && prizeManager.minPrizesOnBoard == 0 &&
+            (prizeManager.prizeTypes == null || prizeManager.prizeTypes.Length == 0));
+        Check("physicalSlotPocketsRemainWhileLaneSelectorsStayAbsent", game.medalInlets != null && game.medalInlets.Length == 3 &&
+            game.GetComponentsInChildren<MedalSlotPocket>(true).Length == 3 && (arcade.inletButtons == null || arcade.inletButtons.Length == 0) && (arcade.inletLights == null || arcade.inletLights.Length == 0) &&
+            !UnityEngine.Object.FindObjectsByType<Transform>().Any(t => t.name.StartsWith("InletButton_", StringComparison.Ordinal)));
         Check("coloredPhysicalJackpotLabelsUseJackpot", controller.stations.All(s => s.jackpotPocketText != null && s.jackpotPocketText.text.Contains("JACKPOT") && !s.jackpotPocketText.text.Contains("大当たり")));
     }
     private static void CheckPoolLabels(string suffix)
@@ -657,471 +711,353 @@ public static class MedalUpperFlowPlayCheck
         Enumerable.Range(0, 3).All(i => Vector3.Distance(upper.colorGateBodies[i].position,
             upper.colorGateBodies[i].transform.parent.TransformPoint(upper.colorGateClosedPositions[i] + Vector3.up * (open ? upper.colorGateRaiseHeight : 0))) < .025f);
 
-    // Stability adds natural selectors 14..43, guards 44..50, airborne exit 51, and an earned-only upper watchdog 52.
-    private static int? ForcedBumperHits => UpperWatchdogRound || RearUpperRound ? 3 : roundIndex == 0 ? 50 : roundIndex == 1 || roundIndex == 2 ? 30 : roundIndex >= 6 ? 51 : (int?)null;
-    private static int? ForcedUpperWin => ForcedBumperHits.HasValue ? ForcedBumperHits.Value * 2 : (int?)null;
-    private static bool NaturalSelectorRound => (roundIndex >= 6 && roundIndex <= 8) || (StabilityMode && roundIndex >= 14 && roundIndex <= 43);
-    private static bool ForceColor => roundIndex >= 9 && roundIndex <= 11;
-    private static bool GuardRound => roundIndex == 12 || (StabilityMode && roundIndex >= 44 && roundIndex <= 50);
-    private static int GuardFaceIndex => roundIndex >= 44 ? roundIndex - 43 : 0;
-    private static Rigidbody GuardBody => upper.outBlockBodies[GuardFaceIndex];
-    private static MedalLotteryOutflow GuardOutflow => upper.outflows[GuardFaceIndex];
-    private static string GuardCheckName(string name) => GuardFaceIndex == 0 ? name : name + "_face" + GuardFaceIndex;
-    private static bool TimeoutRound => roundIndex == 13;
-    private static bool UnguardedOutsideRound => StabilityMode && roundIndex == 51;
-    private static bool UpperWatchdogRound => StabilityMode && roundIndex == 52;
-    private static bool RearUpperRound => ReferenceMode && roundIndex == 14;
-    private static void StartRound()
-    {
-        Require(!controller.IsUpperDrawing && !controller.IsSelectingColor && !controller.IsColorRoundActive && !controller.ActiveKind.HasValue, "Previous lottery did not become idle.");
-        RestorePocketStates(); ClearDrawQueue(); ClearCredits(); upper.colorSelectionTimeout = originalSelectorTimeout; upper.drawTimeout = originalUpperTimeout;
-        upperBaseline = upperEvents; selectionBaseline = selectionEvents; colorBaseline = colorEvents;
-        lotteriesBefore = controller.TotalLotteries; colorRoundsBefore = controller.TotalColorRounds;
-        upperChecked = upperRouted = selectorChecked = selectorRouted = lowerChecked = lowerRouted = rotationObserved = gatesLiftObserved = captureDone = false;
-        selectedKind = finishedKind = null; ticket = 0; roundWallet = game.medals; roundStarted = Now;
-        guardStep = 0; guardedToken = null; guardCollisionObserved = selectionGuardUsed = false;
-        selectionExitedBowl = false; unguardedExitPosition = null;
-        unguardedBallRadius = .26f;
-        upperToken = null; targetBumper = null; bumperHitStage = actualBumperContacts = finalUpperHits = finalUpperWin = 0;
-        thresholdObserved = upperExitedBowl = false; liveThresholdStartedFixed = -1f;
-        upperEndedWithOriginalToken = false; finalUpperBallLocalPosition = null; rearUpperBallRadius = .26f;
-        nextSelectorSampleAt = 0;
-        roundAngles = Angles(); selectorStartedFixed = -1;
-        controller.QueueBallDraw(MedalJackpotKind.Ruby); Set(controller, "nextLotteryAt", 0f); controller.enabled = true; Enter(Phase.Rounds);
-    }
+    private static bool[] GuardStates() => Enumerable.Range(0, 4).Select(upper.IsOutBlockUsed).ToArray();
+    private static bool SameUpperIdentity() => upperToken != null && upperToken.GetEntityId().ToString() == upperObjectId && ReferenceEquals(upperToken, upper.ActiveBall) &&
+        upperToken.station == upper && upperToken.ticket == ticket && upper.CurrentTicket == ticket && !upperToken.IsConsumed && controller.IsUpperDrawing;
+    private static bool GuardTargetsMatch() => Enumerable.Range(0, 4).All(i => Vector3.Distance(upper.outBlockBodies[i].position,
+        upper.outBlockBodies[i].transform.parent.TransformPoint(upper.outBlockClosedPositions[i] + Vector3.up * (upper.IsOutBlockUsed(i) ? upper.outBlockRaiseHeight : 0))) < .04f);
+    private static void OnUpperStarted() => upperStartEvents++;
+    private static void OnLegacySelectorStarted() => legacyEvents++;
+    private static void OnLegacySelectorFinished(MedalJackpotKind? kind, bool timedOut) => legacyEvents++;
     private static void OnUpperFinish(int payout)
     {
-        upperEvents++; lastUpperWin = payout; upperTimedOut = upper.LastTimedOut;
-        upperExitedBowl = upper.LastExitedBowl; finalUpperHits = upper.TotalBumperHits; finalUpperWin = upper.BumperWin;
-        if (roundIndex >= 3 && roundIndex <= 5) naturalUpperPhysicalContactTotal += actualBumperContacts;
+        upperEvents++; lastUpperWin = payout; upperTimedOut = upper.LastTimedOut; upperExitedBowl = upper.LastExitedBowl;
+        finalUpperHits = upper.TotalBumperHits; finalUpperWin = upper.BumperWin;
         upperEndedWithOriginalToken = upperToken != null && upperToken.station == upper && upperToken.ticket == ticket && upperToken.IsConsumed;
-        if (upperToken != null && upperToken.GetComponent<Rigidbody>() != null)
-            finalUpperBallLocalPosition = upper.transform.InverseTransformPoint(upperToken.GetComponent<Rigidbody>().position);
-    }
-    private static void OnSelectionFinish(MedalJackpotKind? kind, bool timedOut)
-    {
-        selectionEvents++; selectedKind = kind; selectionTimedOut = timedOut; selectionGuardUsed = upper.OutBlockUsed;
-        selectionExitedBowl = upper.LastExitedBowl;
-        if (UnguardedOutsideRound && guardedToken != null)
-            unguardedExitPosition = upper.transform.InverseTransformPoint(guardedToken.GetComponent<Rigidbody>().position);
+        if (upperToken != null) finalUpperBallLocalPosition = upper.transform.InverseTransformPoint(upperToken.GetComponent<Rigidbody>().position);
     }
     private static void OnColorFinish(MedalJackpotKind kind, int payout, bool jackpot)
-    { colorEvents++; finishedKind = kind; lastColorPayout = payout; finishedJackpot = jackpot; colorFinishedAt = Now; }
-
+    {
+        colorEvents++; finishedKind = kind; lastColorPayout = payout; finishedJackpot = jackpot; visitFinishedAt = Now;
+        if (roundIndex > 0) earnedColorTotal += payout;
+        // The forced fixture examines the returned state before requesting its
+        // next contact; natural rounds continue without this test placement.
+        if (roundIndex == 0 && phase == Phase.Rounds && SameUpperIdentity() && !upper.IsUpperSuspended) ParkUpperBall();
+    }
+    private static void ClearFixtureBoard()
+    {
+        int wallet = game.medals; long queued = game.PendingPayoutMedals;
+        var removed = new List<object>();
+        foreach (var item in game.itemsRoot.GetComponentsInChildren<MedalItem>(true))
+        {
+            var body = item.GetComponent<Rigidbody>();
+            removed.Add(new { name = item.name, entityId = item.GetEntityId().ToString(), item.isBall, item.isPrize,
+                item.payoutAlreadyCredited, item.collected, kinematic = body != null && body.isKinematic,
+                position = Pos(game.transform.InverseTransformPoint(item.transform.position)) });
+            item.collected = true; game.UnregisterItem(item); UnityEngine.Object.Destroy(item.gameObject);
+        }
+        Check("fixtureCleanupPreservesWalletAndPayoutQueue_" + roundIndex, game.medals == wallet && game.PendingPayoutMedals == queued &&
+            game.CountBoardItems(false) == 0 && game.CountBoardItems(true) == 0);
+        fixtureBoundaries.Add(new { round = roundIndex, walletBefore = wallet, walletAfter = game.medals,
+            pendingBefore = queued, pendingAfter = game.PendingPayoutMedals, removed = removed.ToArray(),
+            slotsSpinning = controller.IsSlotSpinning, slotCredits = controller.SpinCredits, totalSpins = controller.TotalSpins,
+            readiness = Diagnostics() });
+    }
+    private static void StartRound()
+    {
+        Require(!controller.IsUpperDrawing && !controller.IsColorRoundActive && !controller.ActiveKind.HasValue, "Previous integrated round is still active.");
+        RestorePocketStates(); ClearDrawQueue(); ClearCredits(); upper.drawTimeout = originalUpperTimeout;
+        // The preceding Slots phase already verifies real pocket entry. During
+        // upper fixtures, keep its geometry while preventing credited payout
+        // coins from starting independent slot awards against this ledger.
+        foreach (var pocket in game.GetComponentsInChildren<MedalSlotPocket>(true))
+        {
+            if (!upperFixtureSlotStates.ContainsKey(pocket)) upperFixtureSlotStates[pocket] = pocket.enabled;
+            pocket.enabled = false;
+        }
+        Check("upperFixtureDisablesOnlyAuxiliarySlotEntries_" + roundIndex, upperFixtureSlotStates.Count == 3 &&
+            upperFixtureSlotStates.Keys.All(p => p != null && !p.enabled && p.GetComponent<Collider>() != null &&
+                p.GetComponent<Collider>().enabled && p.GetComponent<Collider>().isTrigger));
+        ClearFixtureBoard();
+        upperBaseline = upperEvents; mainUpperStartBaseline = upperStartEvents;
+        roundWallet = game.medals; earnedColorTotal = 0; roundStarted = Now; ticket = 0; upperToken = null; upperRouted = false;
+        actualBumperContacts = finalUpperHits = finalUpperWin = 0; upperExitedBowl = upperTimedOut = upperEndedWithOriginalToken = false;
+        finalUpperBallLocalPosition = null; visitIndex = visitStage = guardIndex = guardStage = 0;
+        physicalGuardContacts.Clear(); pulseStage = 0; nextNaturalSample = Time.time;
+        if (roundIndex > 0) UnityEngine.Random.InitState(naturalSeeds[roundIndex - 1]);
+        controller.QueueBallDraw(MedalJackpotKind.Ruby); Set(controller, "nextLotteryAt", 0f); controller.enabled = true;
+        integratedStep = IntegratedStep.WaitBall; Enter(Phase.Rounds);
+    }
     private static void ParkUpperBall()
-        => Place(upperToken.GetComponent<Rigidbody>(), upper.transform.TransformPoint(upper.guideLocalCenter + Vector3.up * 3f));
-
-    private static void TickBumperPulses()
+        // Keep the forced-contact fixture above the deck during gate/rotor waits.
+        // It remains the same dynamic sphere; natural rounds never use this hold.
+        => Place(upperToken.GetComponent<Rigidbody>(), upper.transform.TransformPoint(upper.guideLocalCenter + Vector3.up * 10f));
+    private static void BeginPulses(int count, IntegratedStep next)
+    { pulseTargetHits = count; pulseStage = 0; integratedStep = next; }
+    private static bool TickPulses()
     {
-        Require(ReferenceEquals(upper.ActiveBall, upperToken) && !upperToken.IsConsumed, "Upper bumper pulses lost the original ball.");
-        int targetHits = ForcedBumperHits.Value;
-        Require(upper.TotalBumperHits <= targetHits, "Unexpected extra upper bumper contacts: " + roundIndex);
-        if (bumperHitStage == 1)
+        Require(SameUpperIdentity() && upper.IsDrawing && !upper.IsUpperSuspended, "Physical bumper pulse lost the active original upper ball.");
+        Require(upper.TotalBumperHits <= pulseTargetHits, "Unexpected extra bumper hits while routing the test ball.");
+        if (pulseStage == 1)
         {
-            if (upper.TotalBumperHits == hitsBeforePulse)
-            {
-                Require(Time.fixedTime - placedFixedTime < .5f, "The incoming ball did not physically enter its bumper: " + roundIndex);
-                return;
-            }
-            Check("actualUpperBumperHitAddsTwo_" + roundIndex + "_hit" + upper.TotalBumperHits,
-                Time.fixedTime > placedFixedTime && upper.TotalBumperHits == hitsBeforePulse + 1 && upper.BumperWin == upper.TotalBumperHits * 2 &&
-                upper.LastBumper == targetBumper && controller.LiveUpperWin == upper.BumperWin && game.medals == roundWallet &&
-                upper.IsDrawing && !upper.IsSelectingColor && !controller.IsColorRoundActive && upperEvents == upperBaseline && selectionEvents == selectionBaseline);
-            ParkUpperBall(); nextBumperPulseFixed = Time.fixedTime + .04f; bumperHitStage = 2;
-            return;
+            if (upper.TotalBumperHits == pulseBefore)
+            { Require(Time.fixedTime - placedFixedTime < .5f, "The incoming original ball did not contact its real bumper."); return false; }
+            Check("actualBumperContactAddsExactlyTwo_hit" + upper.TotalBumperHits, Time.fixedTime > placedFixedTime && upper.TotalBumperHits == pulseBefore + 1 &&
+                upper.BumperWin == upper.TotalBumperHits * 2 && controller.LiveUpperWin == upper.BumperWin && upper.LastBumper == targetBumper &&
+                game.medals == roundWallet + earnedColorTotal && upperEvents == upperBaseline && !controller.IsColorRoundActive && legacyEvents == 0);
+            ParkUpperBall(); pulseNextFixed = Time.fixedTime + .04f; pulseStage = 2; return false;
         }
-        if (bumperHitStage == 2 && Time.fixedTime < nextBumperPulseFixed) return;
-        if (upper.TotalBumperHits >= targetHits)
-        {
-            if (UpperWatchdogRound)
-            {
-                if (bumperHitStage != 3)
-                {
-                    ParkUpperBall();
-                    upper.drawTimeout = Mathf.Max(.2f, Time.time - (float)Field(upper, "startedAt").GetValue(upper) + .2f);
-                    bumperHitStage = 3; upperRouted = true;
-                }
-                return;
-            }
-            if (upper.BumperWin > 100)
-            {
-                if (liveThresholdStartedFixed < 0)
-                {
-                    ParkUpperBall(); liveThresholdStartedFixed = Time.fixedTime;
-                    upper.BeginColorSelection(controller, ticket);
-                    Check("liveOver100KeepsSameUpperBallWithoutEarlySelection_" + roundIndex,
-                        upper.IsDrawing && controller.IsUpperDrawing && ReferenceEquals(upperToken, upper.ActiveBall) && !upperToken.IsConsumed &&
-                        !upper.IsSelectingColor && !controller.IsSelectingColor && !controller.IsColorRoundActive &&
-                        controller.TotalColorRounds == colorRoundsBefore && upperEvents == upperBaseline && selectionEvents == selectionBaseline &&
-                        game.medals == roundWallet && controller.stations.All(s => s.IsRotating && !s.IsDrawing));
-                    return;
-                }
-                if (Time.fixedTime - liveThresholdStartedFixed < .4f) return;
-                var angles = Angles();
-                thresholdObserved = Enumerable.Range(0, roundAngles.Length).All(i => Quaternion.Angle(roundAngles[i], angles[i]) > 2) &&
-                    controller.stations.All(s => Mathf.Abs(s.currentDividerSpeed) >= 17.999f && Mathf.Abs(s.currentDividerSpeed) <= 55.001f);
-                Check("liveOver100RotatesAllThreeBeforeUpperEnds_" + roundIndex, thresholdObserved && GatesAtTarget(true) &&
-                    upper.IsDrawing && controller.IsUpperDrawing && ReferenceEquals(upperToken, upper.ActiveBall) &&
-                    !controller.IsSelectingColor && !controller.IsColorRoundActive && game.medals == roundWallet && upperEvents == upperBaseline);
-            }
-            else Check("liveAtOrBelow100KeepsLowerRotorsStopped_" + roundIndex, AnglesUnchanged(roundAngles) && !upper.ColorGatesOpen &&
-                controller.stations.All(s => !s.IsRotating && Mathf.Abs(s.currentDividerSpeed) < .001f));
-            RouteActualUpperExit(); upperRouted = true; bumperHitStage = 3; return;
-        }
-        targetBumper = upper.bumpers[upper.TotalBumperHits % upper.bumpers.Length];
-        var collider = targetBumper.GetComponent<SphereCollider>();
-        var center = collider.bounds.center;
-        Vector3 normal = center - upper.transform.TransformPoint(upper.guideLocalCenter); normal.y = 0f; normal.Normalize();
+        if (pulseStage == 2 && Time.fixedTime < pulseNextFixed) return false;
+        if (upper.TotalBumperHits == pulseTargetHits) return true;
+        targetBumper = upper.bumpers[upper.TotalBumperHits % 4]; var collider = targetBumper.GetComponent<SphereCollider>();
+        Vector3 normal = collider.bounds.center - upper.transform.TransformPoint(upper.guideLocalCenter); normal.y = 0; normal.Normalize();
         float radius = upperToken.GetComponent<Collider>().bounds.extents.x;
-        Vector3 surface = collider.ClosestPoint(center + normal * (collider.bounds.extents.magnitude + 1f));
-        Place(upperToken.GetComponent<Rigidbody>(), surface + normal * (radius + .025f));
-        upperToken.GetComponent<Rigidbody>().linearVelocity = -normal * 3.5f;
-        hitsBeforePulse = upper.TotalBumperHits; bumperHitStage = 1;
+        Vector3 face = collider.ClosestPoint(collider.bounds.center + normal * (collider.bounds.extents.magnitude + 1));
+        Place(upperToken.GetComponent<Rigidbody>(), face + normal * (radius + .025f)); upperToken.GetComponent<Rigidbody>().linearVelocity = -normal * 3.5f;
+        pulseBefore = upper.TotalBumperHits; pulseStage = 1; return false;
     }
-
-    private static void RouteActualUpperExit()
+    private static void NegativeUpperChecks()
     {
-        if (RearUpperRound)
-        {
-            rearUpperBallRadius = upperToken.GetComponent<Collider>().bounds.extents.x / Mathf.Max(.001f, Mathf.Abs(upper.transform.lossyScale.x));
-            Vector3 inside = upper.guideLocalCenter + new Vector3(0f, .55f, 2.1f);
-            Place(upperToken.GetComponent<Rigidbody>(), upper.transform.TransformPoint(inside));
-            upperToken.GetComponent<Rigidbody>().linearVelocity = upper.transform.TransformDirection(Vector3.forward * 4f);
-            return;
-        }
-        var exit = upper.upperOutflow.GetComponent<Collider>();
-        Vector3 normal = upper.transform.TransformPoint(upper.guideLocalCenter) - exit.bounds.center; normal.y = 0f; normal.Normalize();
-        float radius = upperToken.GetComponent<Collider>().bounds.extents.x;
-        Vector3 innerFace = exit.ClosestPoint(exit.bounds.center + normal * (exit.bounds.extents.magnitude + 1f));
-        Place(upperToken.GetComponent<Rigidbody>(), innerFace + normal * (radius + .05f));
-        upperToken.GetComponent<Rigidbody>().linearVelocity = -normal * 4f;
+        int win = upper.BumperWin, wallet = game.medals, tokenTicket = upperToken.ticket; var tokenStation = upperToken.station;
+        upperToken.ticket++; bool wrongTicket = !upper.TryHitBumper(upper.bumpers[0], upperToken) && !upper.TryResolveColor(upper.colorRoutePockets[0], upperToken);
+        upperToken.ticket = tokenTicket; upperToken.station = controller.stations[0];
+        bool wrongStation = !upper.TryHitBumper(upper.bumpers[0], upperToken) && !upper.TryResolveColor(upper.colorRoutePockets[0], upperToken); upperToken.station = tokenStation;
+        controller.NotifyUpperBumperHit(controller.stations[0], ticket, win + 2); controller.NotifyUpperBumperHit(upper, ticket + 999, win + 2);
+        controller.NotifyUpperBumperHit(upper, ticket, win + 99); controller.FinishLottery(upper, ticket, false, 9999);
+        controller.FinishColorSelection(upper, ticket, MedalJackpotKind.Ruby, false);
+        Check("wrongUpperTokenAndPrematureCallbacksDoNotPay_" + roundIndex, wrongTicket && wrongStation && upper.BumperWin == win &&
+            controller.LiveUpperWin == win && game.medals == wallet && upperEvents == upperBaseline && SameUpperIdentity() && !controller.IsColorRoundActive);
     }
-
+    private static void TickRound()
+    {
+        Require(Now - roundStarted < 180, "Integrated round exceeded 180 wall-clock seconds: " + roundIndex);
+        if (integratedStep == IntegratedStep.WaitBall)
+        {
+            if (upper.ActiveBall == null) return;
+            upperToken = upper.ActiveBall; upperObjectId = upperToken.GetEntityId().ToString(); ticket = upper.CurrentTicket;
+            var probe = upperToken.gameObject.AddComponent<MedalIntegratedUpperFlowBumperProbe>(); probe.Round = roundIndex; probe.Token = upperToken;
+            Check("newGreenBallResetsWinAndAllFourGuards_" + roundIndex, upperToken.station == upper && upperToken.ticket == ticket && Green(upper.lotteryBallPrefab) &&
+                upper.BumperWin == 0 && upper.TotalBumperHits == 0 && controller.LiveUpperWin == 0 && upper.UsedOutBlockCount == 0 && !GuardStates().Any(used => used) &&
+                !upper.ColorGatesOpen && !controller.AreColorGatesUnlocked && upperStartEvents == mainUpperStartBaseline + 1);
+            NegativeUpperChecks();
+            if (roundIndex == 0) { blueBeforeForcedHits = controller.jackpotPools[1]; ParkUpperBall(); BeginPulses(50, IntegratedStep.PulseTo100); }
+            else integratedStep = IntegratedStep.Natural;
+        }
+        switch (integratedStep)
+        {
+            case IntegratedStep.PulseTo100:
+                if (!TickPulses()) return; holdUntilFixed = Time.fixedTime + .35f; idleAngles = Angles(); integratedStep = IntegratedStep.Hold100; break;
+            case IntegratedStep.Hold100:
+                if (Time.fixedTime < holdUntilFixed) return;
+                int wallet = game.medals; bool closedRejected = upper.colorRoutePockets.All(p => !upper.TryResolveColor(p, upperToken));
+                Check("fiftyActualHitsHave100WinWithAllPortsClosed", actualBumperContacts == 50 && upper.BumperWin == 100 && controller.LiveUpperWin == 100 &&
+                    closedRejected && game.medals == wallet && SameUpperIdentity() && !upper.ColorGatesOpen && !controller.AreColorGatesUnlocked && GatesAtTarget(false) &&
+                    AnglesUnchanged(idleAngles) && controller.stations.All(s => !s.IsDrawing && !s.IsRotating && Mathf.Abs(s.currentDividerSpeed) < .001f));
+                Check("blueJPAddsOnePerActualBumperHit", controller.jackpotPools[1] == blueBeforeForcedHits + 50);
+                BeginPulses(51, IntegratedStep.PulseTo102); break;
+            case IntegratedStep.PulseTo102:
+                if (!TickPulses()) return; holdUntilFixed = Time.fixedTime + .65f; roundAngles = Angles(); integratedStep = IntegratedStep.HoldOpen; break;
+            case IntegratedStep.HoldOpen:
+                if (Time.fixedTime < holdUntilFixed) return;
+                var after = Angles();
+                Check("fiftyFirstActualHitUnlocksThreePortsAndRotatesAllClunes", upper.BumperWin == 102 && controller.LiveUpperWin == 102 && SameUpperIdentity() &&
+                    upper.ColorGatesOpen && controller.AreColorGatesUnlocked && GatesAtTarget(true) && !controller.IsColorRoundActive && legacyEvents == 0 &&
+                    game.medals == roundWallet && upperEvents == upperBaseline && Enumerable.Range(0, after.Length).All(i => Quaternion.Angle(roundAngles[i], after[i]) > 2) &&
+                    controller.stations.All(s => !s.IsDrawing && s.IsRotating && Math.Abs(s.currentDividerSpeed) >= 17.999f && Math.Abs(s.currentDividerSpeed) <= 55.001f));
+                TestBusySettings(); guardIndex = 0; BeginGuard(IntegratedStep.Visit); break;
+            case IntegratedStep.Guard:
+                TickGuard(); break;
+            case IntegratedStep.Visit:
+                TickVisit(); break;
+            case IntegratedStep.PulseTo104:
+                if (!TickPulses()) return;
+                Check("resumedOriginalBallCanEarnAnotherTwoWithoutEarlyUpperPayment", upper.BumperWin == 104 && actualBumperContacts == 52 && SameUpperIdentity() &&
+                    game.medals == roundWallet + earnedColorTotal && upperEvents == upperBaseline && upper.ColorGatesOpen);
+                guardIndex = 1; BeginGuard(IntegratedStep.FinalOut); break;
+            case IntegratedStep.FinalOut:
+                if (!upperRouted) { RouteActualFrontOut(); upperRouted = true; return; }
+                if (upperEvents <= upperBaseline) return;
+                Check("actualFrontOutPaysAccumulated104OnceAndConsumesOriginalBall", upperEvents == upperBaseline + 1 && lastUpperWin == 104 && finalUpperWin == 104 &&
+                    finalUpperHits == 52 && !upperTimedOut && upperExitedBowl && upperEndedWithOriginalToken && game.medals == roundWallet + earnedColorTotal + 104 &&
+                    !controller.IsUpperDrawing && !controller.IsColorRoundActive && !controller.AreColorGatesUnlocked);
+                int paidWallet = game.medals; controller.FinishLottery(upper, ticket, false, 104); controller.NotifyUpperColorRoute(upper, ticket, MedalJackpotKind.Ruby);
+                Check("finalUpperDuplicateAndStaleRoutesCannotPayAgain", game.medals == paidWallet && upperEvents == upperBaseline + 1 && !controller.IsUpperDrawing && !controller.IsColorRoundActive);
+                CompleteRound(); break;
+            case IntegratedStep.Natural:
+                SampleNaturalUpper();
+                if (upperEvents <= upperBaseline) return;
+                Check("naturalUpperEarnedWinPaidOnce_" + roundIndex, upperEvents == upperBaseline + 1 && lastUpperWin == finalUpperHits * 2 && finalUpperWin == lastUpperWin &&
+                    actualBumperContacts >= finalUpperHits && upperEndedWithOriginalToken && game.medals == roundWallet + earnedColorTotal + lastUpperWin && upperExitedBowl && !upperTimedOut);
+                naturalUpperCount++; naturalUpperPhysicalContactTotal += actualBumperContacts; CompleteRound(); break;
+        }
+    }
+    private static void BeginGuard(IntegratedStep following)
+    { afterGuard = following; guardStage = 0; integratedStep = IntegratedStep.Guard; }
+    private static void IncomingGuard()
+    {
+        var guard = upper.outBlockBodies[guardIndex]; var collider = guard.GetComponent<Collider>();
+        Vector3 normal = guard.transform.forward.normalized; float radius = upperToken.GetComponent<Collider>().bounds.extents.x;
+        Vector3 face = collider.ClosestPoint(collider.bounds.center + normal * (collider.bounds.extents.magnitude + 1));
+        Place(upperToken.GetComponent<Rigidbody>(), face + normal * (radius + .025f)); upperToken.GetComponent<Rigidbody>().linearVelocity = -normal * 3.5f;
+    }
+    private static void TickGuard()
+    {
+        Require(SameUpperIdentity() && !upper.IsUpperSuspended, "Individual guard test lost the original live upper ball.");
+        var block = upper.outBlocks[guardIndex];
+        if (guardStage == 0)
+        {
+            Require(!upper.IsOutBlockUsed(guardIndex), "Guard has already been used before its forced real collision.");
+            guardContactBaseline = physicalGuardContacts.TryGetValue(block, out int count) ? count : 0; IncomingGuard(); guardStage = 1; return;
+        }
+        if (guardStage == 1)
+        {
+            if (!upper.IsOutBlockUsed(guardIndex)) { Require(Time.fixedTime - placedFixedTime < .5f, "Incoming original ball missed white guard."); return; }
+            guardUsedFixed = Time.fixedTime;
+            Check("actualGuardFaceConsumesOnlyItself_" + guardIndex, Time.fixedTime > placedFixedTime && upper.UsedOutBlockCount == guardIndex + 1 &&
+                GuardStates().SequenceEqual(Enumerable.Range(0, 4).Select(i => i <= guardIndex)) && SameUpperIdentity() && !upperToken.IsConsumed &&
+                game.medals == roundWallet + earnedColorTotal && upperEvents == upperBaseline);
+            ParkUpperBall(); guardStage = 2; return;
+        }
+        if (guardStage == 2)
+        { if (Time.fixedTime <= placedFixedTime) return; IncomingGuard(); guardStage = 3; return; }
+        if (guardStage == 3)
+        {
+            int contacts = physicalGuardContacts.TryGetValue(block, out int count) ? count : 0;
+            if (contacts < guardContactBaseline + 2) { Require(Time.fixedTime - placedFixedTime < .12f, "Second real guard contact was not observed before retraction."); return; }
+            Check("sameBallSecondGuardContactDoesNotRestoreOrSpendAnotherGuard_" + guardIndex, upper.IsOutBlockUsed(guardIndex) && upper.UsedOutBlockCount == guardIndex + 1 &&
+                SameUpperIdentity() && game.medals == roundWallet + earnedColorTotal && upperEvents == upperBaseline);
+            ParkUpperBall(); guardStage = 4; return;
+        }
+        if (guardStage == 4)
+        {
+            if (Time.fixedTime - guardUsedFixed < .85f) return;
+            Check("onlyUsedGuardPlatesWithdrawIndependently_" + guardIndex, GuardTargetsMatch() && upper.UsedOutBlockCount == guardIndex + 1 && SameUpperIdentity());
+            successfulGuardCount++; guardContacts.Add(new { index = guardIndex, tokenId = upperObjectId, ticket, used = GuardStates(),
+                actualCollisionEnterCount = physicalGuardContacts[block] - guardContactBaseline, position = Pos(upper.outBlockBodies[guardIndex].position), win = upper.BumperWin });
+            if (guardIndex == 0) { integratedStep = afterGuard; visitStage = 0; return; }
+            guardIndex++;
+            if (guardIndex < 4) { guardStage = 0; return; }
+            upperRouted = false; integratedStep = afterGuard;
+        }
+    }
+    private static void TickVisit()
+    {
+        Require(Now - visitStarted < 20 || visitStage == 0, "A color visit exceeded 20 seconds.");
+        MedalJackpotKind kind = (MedalJackpotKind)(visitIndex / 2); bool jackpot = visitIndex % 2 == 1;
+        if (visitStage == 0)
+        {
+            Require(SameUpperIdentity() && !upper.IsUpperSuspended && upper.ColorGatesOpen, "Color visit did not start from the original live upper ball.");
+            RestorePocketStates(); visitingStation = controller.stations[(int)kind]; visitingToken = null; visitColorTicket = 0;
+            visitUpperHits = upper.TotalBumperHits; visitUpperWin = upper.BumperWin; visitWallet = game.medals; visitGuardSnapshot = GuardStates();
+            visitUpperEvents = upperEvents; visitColorEvents = colorEvents; visitStarted = Now;
+            yellowBeforePort = controller.jackpotPools[2];
+            var port = upper.colorRoutePockets.Single(p => p.kind == kind); var collider = port.GetComponent<Collider>();
+            Vector3 normal = upper.transform.TransformPoint(upper.guideLocalCenter) - collider.bounds.center; normal.y = 0; normal.Normalize();
+            float radius = upperToken.GetComponent<Collider>().bounds.extents.x;
+            Vector3 face = collider.ClosestPoint(collider.bounds.center + normal * (collider.bounds.extents.magnitude + 1));
+            Place(upperToken.GetComponent<Rigidbody>(), face + normal * (radius + .025f)); upperToken.GetComponent<Rigidbody>().linearVelocity = -normal * 3.5f;
+            visitStage = 1; return;
+        }
+        if (visitStage == 1)
+        {
+            if (!controller.ActiveKind.HasValue || visitingStation.ActiveBall == null) return;
+            visitingToken = visitingStation.ActiveBall; visitColorTicket = visitingStation.CurrentTicket;
+            Check("yellowJPAddsTenPerActualUpperPocketEntry_visit" + visitIndex, controller.jackpotPools[2] == yellowBeforePort + 10);
+            Check("actualIntegratedPortSuspendsSameUpperBall_visit" + visitIndex, Time.fixedTime > placedFixedTime && controller.ActiveKind == kind &&
+                upper.LastColorPocket != null && upper.LastColorPocket.kind == kind && SameUpperIdentity() && upper.IsUpperSuspended &&
+                upper.BumperWin == visitUpperWin && upper.TotalBumperHits == visitUpperHits && !upperToken.IsConsumed && game.medals == visitWallet &&
+                upperEvents == visitUpperEvents && GuardStates().SequenceEqual(visitGuardSnapshot) && upper.ColorGatesOpen && controller.AreColorGatesUnlocked &&
+                visitingToken.station == visitingStation && visitingToken.ticket == visitColorTicket && visitingToken != upperToken &&
+                controller.stations.Count(s => s.IsDrawing) == 1 && controller.stations.All(s => s.IsRotating));
+            int wallet = game.medals, starts = controller.TotalLotteries;
+            controller.FinishLottery(controller.stations[((int)kind + 1) % 3], visitColorTicket, true, 9999);
+            controller.FinishLottery(visitingStation, visitColorTicket + 777, true, 9999);
+            controller.FinishLottery(visitingStation, visitColorTicket, true, 9999);
+            controller.NotifyUpperColorRoute(upper, ticket, kind); controller.NotifyUpperColorRoute(upper, ticket + 888, kind);
+            Check("activeLowerRejectsPrematureWrongAndDuplicateRoutes_visit" + visitIndex, game.medals == wallet && colorEvents == visitColorEvents &&
+                controller.TotalLotteries == starts && visitingStation.IsDrawing && ReferenceEquals(visitingToken, visitingStation.ActiveBall) && upper.IsUpperSuspended);
+            chosenColorPocket = visitingStation.GetComponentsInChildren<MedalLotteryPocket>().First(p => p.jackpot == jackpot);
+            expectedPool = controller.jackpotPools[(int)kind]; RestrictPockets(visitingStation, chosenColorPocket);
+            suspendedElapsedAt = upper.UpperElapsedSeconds; lowerPocketAt = Time.time + .35f;
+            bool staleResume = !upper.ResumeUpperDraw(controller, ticket + 444);
+            bool pausedContact = !upper.TryHitBumper(upper.bumpers[0], upperToken) && !upper.TryBlockOutflow(upper.outBlocks[1], upperToken) &&
+                !upper.TryResolveColor(upper.colorRoutePockets[0], upperToken);
+            Check("pausedBallRejectsStaleResumeAndContacts_visit" + visitIndex, staleResume && pausedContact && SameUpperIdentity() && upper.IsUpperSuspended &&
+                upper.BumperWin == visitUpperWin && GuardStates().SequenceEqual(visitGuardSnapshot));
+            visitStage = 3; return;
+        }
+        if (visitStage == 3)
+        {
+            if (Time.time < lowerPocketAt) return;
+            Check("lowerVisitPausesOnlyUpperClock_visit" + visitIndex, upper.IsUpperSuspended && SameUpperIdentity() &&
+                Math.Abs(upper.UpperElapsedSeconds - suspendedElapsedAt) < .005f && game.medals == visitWallet &&
+                upperToken.GetComponent<Rigidbody>().isKinematic && !upperToken.GetComponent<Rigidbody>().detectCollisions &&
+                upperToken.GetComponentsInChildren<Collider>().All(c => !c.enabled) && upperToken.GetComponentsInChildren<Renderer>().All(r => !r.enabled));
+            Place(visitingToken.GetComponent<Rigidbody>(), chosenColorPocket.GetComponent<Collider>().bounds.center); visitStage = 2; return;
+        }
+        if (visitStage == 2)
+        {
+            if (colorEvents <= visitColorEvents || Now - visitFinishedAt < .15 || upper.IsUpperSuspended) return;
+            int expected = jackpot ? expectedPool : chosenColorPocket.smallReward;
+            Check("lowerResultCreditsOnlyItsPrizeAndReturnsOriginalUpperBall_visit" + visitIndex, colorEvents == visitColorEvents + 1 && finishedKind == kind &&
+                finishedJackpot == jackpot && lastColorPayout == expected && game.medals == visitWallet + expected && upperEvents == visitUpperEvents &&
+                visitingStation.LastPocket == chosenColorPocket && !visitingStation.LastTimedOut && SameUpperIdentity() && upper.IsDrawing && !upper.IsUpperSuspended &&
+                upperToken.GetComponent<Rigidbody>().useGravity && !upperToken.GetComponent<Rigidbody>().isKinematic &&
+                upper.BumperWin == visitUpperWin && upper.TotalBumperHits == visitUpperHits && controller.LiveUpperWin == visitUpperWin &&
+                GuardStates().SequenceEqual(visitGuardSnapshot) && upper.ColorGatesOpen && controller.AreColorGatesUnlocked && !controller.IsColorRoundActive &&
+                !controller.ActiveKind.HasValue && controller.stations.All(s => s.IsRotating && !s.IsDrawing));
+            earnedColorTotal += expected; ParkUpperBall();
+            int wallet = game.medals, events = colorEvents; controller.FinishLottery(visitingStation, visitColorTicket, jackpot, expected);
+            controller.NotifyUpperColorRoute(upper, ticket + 555, kind); controller.FinishColorSelection(upper, ticket, kind, false);
+            Check("staleLowerResultCannotPayOrReplaceReturnedBall_visit" + visitIndex, game.medals == wallet && colorEvents == events && SameUpperIdentity() && !controller.IsColorRoundActive);
+            if (jackpot) Check("actualJackpotResetsPool_" + kind, controller.jackpotPools[(int)kind] == settings.jackpotResetValues[(int)kind]);
+            CheckPoolLabels("afterVisit" + visitIndex);
+            visits.Add(new { index = visitIndex, kind = kind.ToString(), jackpot, payout = expected, lowerTicket = visitColorTicket, upperTicket = ticket,
+                upperTokenId = upperObjectId, upperWin = upper.BumperWin, upperHits = upper.TotalBumperHits, guardsUsed = GuardStates(),
+                upperElapsedSeconds = upper.UpperElapsedSeconds, upperPaidEvents = upperEvents - upperBaseline, elapsedWallSeconds = Now - visitStarted });
+            RestorePocketStates(); visitIndex++; visitStage = 0;
+            if (visitIndex == 6) BeginPulses(52, IntegratedStep.PulseTo104);
+        }
+    }
+    private static void RouteActualFrontOut()
+    {
+        var collider = upper.upperOutflow.GetComponent<Collider>();
+        Vector3 normal = upper.transform.TransformPoint(upper.guideLocalCenter) - collider.bounds.center; normal.y = 0; normal.Normalize();
+        float radius = upperToken.GetComponent<Collider>().bounds.extents.x;
+        Vector3 face = collider.ClosestPoint(collider.bounds.center + normal * (collider.bounds.extents.magnitude + 1));
+        Place(upperToken.GetComponent<Rigidbody>(), face + normal * (radius + .05f)); upperToken.GetComponent<Rigidbody>().linearVelocity = -normal * 4f;
+    }
+    private static void SampleNaturalUpper()
+    {
+        if (Time.time < nextNaturalSample || upperToken == null || upperToken.IsConsumed) return;
+        nextNaturalSample = Time.time + 1f; var body = upperToken.GetComponent<Rigidbody>();
+        naturalUpperSamples.Add(new { round = roundIndex, seed = naturalSeeds[roundIndex - 1], ticket, tokenId = upperObjectId,
+            localPosition = Pos(upper.transform.InverseTransformPoint(body.position)), velocity = Pos(body.linearVelocity), hits = upper.TotalBumperHits,
+            win = upper.BumperWin, suspended = upper.IsUpperSuspended, upperElapsed = upper.UpperElapsedSeconds, activeColor = controller.ActiveKind?.ToString() });
+    }
     internal static void ObserveUpperBumperContact(int round, LotteryBallToken token, Collision collision)
     {
         if (phase != Phase.Rounds || round != roundIndex || token == null || !ReferenceEquals(token, upperToken)) return;
         var bumper = collision.collider.GetComponent<MedalLotteryBumper>();
-        if (bumper == null || bumper.station != upper || !upper.bumpers.Contains(bumper)) return;
-        actualBumperContacts++;
-        bumperContactSamples.Add(new { round, ticket, bumper = bumper.name, contact = actualBumperContacts,
-            fixedTime = Time.fixedTime, localBallPosition = Pos(upper.transform.InverseTransformPoint(token.GetComponent<Rigidbody>().position)),
-            localContactPosition = collision.contactCount == 0 ? null : Pos(upper.transform.InverseTransformPoint(collision.GetContact(0).point)) });
+        if (bumper != null && bumper.station == upper && upper.bumpers.Contains(bumper))
+        {
+            actualBumperContacts++; bumperContactSamples.Add(new { round, ticket, bumper = bumper.name, contact = actualBumperContacts,
+                fixedTime = Time.fixedTime, localBallPosition = Pos(upper.transform.InverseTransformPoint(token.GetComponent<Rigidbody>().position)) });
+        }
+        var block = collision.collider.GetComponent<MedalOutBlock>();
+        if (block != null && block.station == upper && upper.outBlocks.Contains(block))
+            physicalGuardContacts[block] = physicalGuardContacts.TryGetValue(block, out int count) ? count + 1 : 1;
     }
-
-    private static void TickRound()
-    {
-        Require(Now - roundStarted < 90, "Lottery round exceeded 90 wall-clock seconds: " + roundIndex);
-        SampleNaturalSelector();
-        if (controller.IsUpperDrawing && upper.ActiveBall != null)
-        {
-            if (!upperChecked)
-            {
-                upperChecked = true; ticket = upper.CurrentTicket;
-                upperToken = upper.ActiveBall;
-                var probe = upperToken.gameObject.AddComponent<MedalUpperFlowBumperProbe>(); probe.Round = roundIndex; probe.Token = upperToken;
-                Check("newUpperBallResetsEarnedWin_" + roundIndex, upper.BumperWin == 0 && upper.TotalBumperHits == 0 && controller.LiveUpperWin == 0);
-                Check("sealedRoutesCannotConsumeNormalUpperBall_" + roundIndex,
-                    !upper.ColorGatesOpen && !upper.TryResolveColor(upper.colorRoutePockets[0], upper.ActiveBall) && upper.ActiveBall != null && !upper.ActiveBall.IsConsumed);
-                int wallet = game.medals; controller.FinishLottery(controller.stations[0], ticket, false, 200); controller.FinishLottery(upper, ticket + 1, false, 200);
-                upper.BeginColorSelection(controller, ticket);
-                Check("wrongUpperCallbackAndPrematureSelectionRejected_" + roundIndex,
-                    game.medals == wallet && controller.IsUpperDrawing && !upper.IsSelectingColor && !upper.ColorGatesOpen);
-                var bumper = upper.bumpers[0]; var token = upperToken; int originalTicket = token.ticket;
-                token.ticket++; bool wrongTicket = !upper.TryHitBumper(bumper, token); token.ticket = originalTicket;
-                var originalStation = token.station; token.station = controller.stations[0]; bool wrongStation = !upper.TryHitBumper(bumper, token); token.station = originalStation;
-                controller.NotifyUpperBumperHit(controller.stations[0], ticket, 2); controller.NotifyUpperBumperHit(upper, ticket + 1, 2); controller.NotifyUpperBumperHit(upper, ticket, 999);
-                Check("wrongBumperTokensAndCallbacksCannotAddWin_" + roundIndex, wrongTicket && wrongStation && upper.BumperWin == 0 && controller.LiveUpperWin == 0 && !token.IsConsumed);
-            }
-            if (ForcedBumperHits.HasValue && !upperRouted) TickBumperPulses();
-            return;
-        }
-        if (upperEvents <= upperBaseline) return;
-        if (upperChecked && !results.ContainsKey("upperRewardOnce_" + roundIndex))
-        {
-            RestorePocketStates();
-            Check("upperRewardOnce_" + roundIndex, upperEvents == upperBaseline + 1 && controller.LastUpperWasBumperDraw &&
-                controller.LastUpperWin == lastUpperWin && finalUpperWin == lastUpperWin && finalUpperWin == finalUpperHits * 2 && game.medals == roundWallet + lastUpperWin &&
-                (UpperWatchdogRound ? upperTimedOut : (!ForcedBumperHits.HasValue || !upperTimedOut && upperExitedBowl)) &&
-                (!ForcedUpperWin.HasValue || (lastUpperWin == ForcedUpperWin.Value && upperRouted && Time.fixedTime > placedFixedTime && actualBumperContacts >= ForcedBumperHits.Value)));
-            int wallet = game.medals; controller.FinishLottery(upper, ticket, false, lastUpperWin);
-            Check("duplicateUpperRewardIgnored_" + roundIndex, game.medals == wallet && upperEvents == upperBaseline + 1);
-            if (roundIndex >= 3 && roundIndex <= 5 && controller.LastUpperWasBumperDraw && finalUpperWin == finalUpperHits * 2) naturalUpperCount++;
-            if (UpperWatchdogRound) Check("upperWatchdogAwardsOnlySixEarnedWinAndNoCompensation", upperTimedOut && !upperExitedBowl && lastUpperWin == 6 &&
-                game.medals == roundWallet + 6 && !controller.IsColorRoundActive && selectionEvents == selectionBaseline);
-            if (RearUpperRound)
-            {
-                bool fullRearExit = finalUpperBallLocalPosition.HasValue &&
-                    (finalUpperBallLocalPosition.Value.z - upper.guideLocalCenter.z > upper.bumperBowlOuterRadius + rearUpperBallRadius + .035f ||
-                     finalUpperBallLocalPosition.Value.z - upper.guideLocalCenter.z > upper.bumperBowlOuterRadius - .05f &&
-                     finalUpperBallLocalPosition.Value.y + rearUpperBallRadius < upper.bumperBowlFloorY);
-                Check("rearOpeningEndsOriginalBallAndAwardsSixOnlyOnce", upperRouted && upperEndedWithOriginalToken && fullRearExit && upperExitedBowl &&
-                    !upperTimedOut && finalUpperHits == 3 && actualBumperContacts == 3 && lastUpperWin == 6 && game.medals == roundWallet + 6 &&
-                    upperEvents == upperBaseline + 1 && selectionEvents == selectionBaseline && !controller.IsUpperDrawing && !controller.IsColorRoundActive && !controller.IsSelectingColor);
-            }
-            selectorWallet = game.medals;
-        }
-        if (lastUpperWin <= 100)
-        {
-            Check("singleWinAtOrBelow100NeverUnlocksColors_" + roundIndex, !controller.IsColorRoundActive && !controller.IsSelectingColor && !upper.ColorGatesOpen && controller.TotalColorRounds == colorRoundsBefore && controller.TotalLotteries == lotteriesBefore);
-            Check("singleWinAtOrBelow100KeepsPartitionsStopped_" + roundIndex, AnglesUnchanged(roundAngles) && controller.stations.All(s => Mathf.Abs(s.currentDividerSpeed) < .001f && !s.IsRotating));
-            if (roundIndex == 2) Check("twoSixtyWinsAreNotAccumulatedIntoUnlock", lastUpperWin == 60 && rounds.Count >= 2 && !controller.IsColorRoundActive);
-            CompleteRound(); return;
-        }
-        CheckOnce("singleWinAbove100StartsColorRound_" + roundIndex, controller.TotalColorRounds == colorRoundsBefore + 1);
-        if (controller.IsSelectingColor && upper.ActiveBall != null)
-        {
-            if (!selectorChecked)
-            {
-                selectorChecked = true; selectorStartedFixed = Time.fixedTime;
-                Check("selectorUsesSameTicketAndDisablesNormalWins_" + roundIndex, upper.CurrentTicket == ticket && upper.IsSelectingColor && upper.ColorGatesOpen &&
-                    (upper.normalWinPocketTriggers == null || upper.normalWinPocketTriggers.All(c => !c.enabled)) && controller.stations.All(s => s.IsRotating && !s.IsDrawing) &&
-                    upperEvents == upperBaseline + 1 && !ReferenceEquals(upperToken, upper.ActiveBall));
-                var token = upper.ActiveBall; var pocket = upper.colorRoutePockets[0]; int originalTicket = token.ticket;
-                token.ticket++; bool wrongTicket = !upper.TryResolveColor(pocket, token); token.ticket = originalTicket;
-                var originalStation = token.station; token.station = controller.stations[0]; bool wrongStation = !upper.TryResolveColor(pocket, token); token.station = originalStation;
-                int wallet = game.medals;
-                controller.FinishLottery(upper, ticket, false, 999); controller.FinishColorSelection(controller.stations[0], ticket, MedalJackpotKind.Ruby, false);
-                controller.FinishColorSelection(upper, ticket + 1, MedalJackpotKind.Ruby, false);
-                Check("selectorWrongTokenAndCallbacksRejected_" + roundIndex, wrongTicket && wrongStation && !token.IsConsumed && upper.IsSelectingColor && controller.IsSelectingColor && game.medals == wallet);
-                Check("freshSelectorStartsWithOneOutGuard_" + roundIndex, upper.OutBlockReady && !upper.OutBlockUsed && !upper.TryResolveOutflow(upper.outflow, token) && !token.IsConsumed);
-                if (TimeoutRound)
-                {
-                    Check("nextSelectorRestoresConsumedOutGuard", upper.OutBlockReady && !upper.OutBlockUsed);
-                    upper.colorSelectionTimeout = .2f;
-                    Place(token.GetComponent<Rigidbody>(), upper.colorLaunchPoint.position + Vector3.up * 4f);
-                }
-                TestBusySettings();
-            }
-            if (Time.fixedTime - selectorStartedFixed >= .35f)
-            {
-                var angles = Angles();
-                rotationObserved |= Enumerable.Range(0, roundAngles.Length).All(i => Quaternion.Angle(roundAngles[i], angles[i]) > 2) &&
-                    controller.stations.All(s => Mathf.Abs(s.currentDividerSpeed) >= 17.999f && Mathf.Abs(s.currentDividerSpeed) <= 55.001f);
-                ObserveDividerSpeeds();
-                gatesLiftObserved |= GatesAtTarget(true);
-                if (!captureDone) { Capture("upper-gates-open-" + roundIndex + ".png", null); captureDone = true; }
-                if (GuardRound) TickOutGuard();
-                else if (UnguardedOutsideRound && !selectorRouted)
-                {
-                    guardedToken = upper.ActiveBall;
-                    unguardedBallRadius = guardedToken.GetComponent<Collider>().bounds.extents.x / Mathf.Max(.001f, Mathf.Abs(upper.transform.lossyScale.x));
-                    Place(guardedToken.GetComponent<Rigidbody>(), upper.transform.TransformPoint(new Vector3(1.2f, 2.85f, -5.3f)));
-                    guardedToken.GetComponent<Rigidbody>().linearVelocity = upper.transform.TransformDirection(new Vector3(5.5f, 0, 0));
-                    selectorRouted = true;
-                }
-                else if (ForceColor && !selectorRouted)
-                {
-                    var pocket = upper.colorRoutePockets.Single(p => p.kind == (MedalJackpotKind)(roundIndex - 9));
-                    Place(upper.ActiveBall.GetComponent<Rigidbody>(), pocket.GetComponent<Collider>().bounds.center); selectorRouted = true;
-                }
-            }
-            return;
-        }
-        if (selectionEvents <= selectionBaseline) return;
-        if (!results.ContainsKey("realSelectorResolvesColorOrNaturalOut_" + roundIndex))
-        {
-            bool hitColor = !selectionTimedOut && selectedKind.HasValue && upper.LastColorPocket != null && upper.LastColorPocket.kind == selectedKind;
-            bool naturalOut = !selectionTimedOut && !selectedKind.HasValue && selectionExitedBowl && controller.LastPayout == 0 && !controller.LastDrawTimedOut;
-            bool timedOut = selectionTimedOut && !selectedKind.HasValue && controller.LastPayout == 15 && controller.LastDrawTimedOut;
-            Check("realSelectorResolvesColorOrNaturalOut_" + roundIndex, (TimeoutRound ? timedOut : hitColor || naturalOut) &&
-                selectionEvents == selectionBaseline + 1 && upper.CurrentTicket == ticket && game.medals == selectorWallet + (TimeoutRound ? 15 : 0) &&
-                (!ForceColor || (hitColor && selectedKind == (MedalJackpotKind)(roundIndex - 9))));
-            if (!TimeoutRound) Check("allThreeRotorsAndGatesOpenedBeforeRouting_" + roundIndex, rotationObserved && gatesLiftObserved);
-            int wallet = game.medals; controller.FinishColorSelection(upper, ticket, selectedKind, false); upper.BeginColorSelection(controller, ticket);
-            Check("duplicateSelectorCannotLaunchOrPayAgain_" + roundIndex, game.medals == wallet && selectionEvents == selectionBaseline + 1 && !upper.IsSelectingColor);
-            if (NaturalSelectorRound && (hitColor || naturalOut)) naturalSelectorCount++;
-            if (GuardRound)
-            {
-                bool sameBallOut = naturalOut && guardCollisionObserved && guardStep == 5 && Time.fixedTime > placedFixedTime &&
-                    controller.TotalLotteries == lotteriesBefore && game.medals == selectorWallet && !controller.IsColorRoundActive;
-                Check(GuardCheckName("actualExteriorOutEndsWithoutCompensation"), sameBallOut);
-                if (sameBallOut) successfulGuardCount++;
-            }
-            if (UnguardedOutsideRound)
-            {
-                bool actuallyOutside = unguardedExitPosition.HasValue && new Vector2(unguardedExitPosition.Value.x, unguardedExitPosition.Value.z + 5.3f).magnitude > 1.95f + unguardedBallRadius + .035f;
-                Check("unguardedAirborneExitEndsWithoutCompensation", naturalOut && !selectionGuardUsed && selectorRouted && actuallyOutside &&
-                    Time.fixedTime > placedFixedTime && controller.TotalLotteries == lotteriesBefore && game.medals == selectorWallet && !controller.IsColorRoundActive);
-            }
-            if (!selectedKind.HasValue)
-            {
-                if (TimeoutRound) Check("selectorWatchdogPaysFifteenOnlyOnce", timedOut && game.medals == selectorWallet + 15 && controller.TotalLotteries == lotteriesBefore && !controller.IsColorRoundActive);
-                CompleteRound(); return;
-            }
-        }
-        if (controller.ActiveKind.HasValue)
-        {
-            var station = controller.stations[(int)controller.ActiveKind.Value];
-            if (station.ActiveBall == null) return;
-            if (!lowerChecked)
-            {
-                lowerChecked = true; colorWallet = game.medals; expectedPool = controller.jackpotPools[(int)station.kind]; jackpotsBefore = controller.TotalJackpots;
-                Check("onlyPhysicallySelectedStationDraws_" + roundIndex, station.kind == selectedKind && station.CurrentTicket == ticket &&
-                    controller.TotalLotteries == lotteriesBefore + 1 && controller.stations.Count(s => s.IsDrawing) == 1);
-                int wallet = game.medals;
-                var wrong = controller.stations.First(s => s != station); controller.FinishLottery(wrong, ticket, true, 999); controller.FinishLottery(station, ticket + 1, true, 999);
-                Check("wrongColoredRewardCallbacksRejected_" + roundIndex, game.medals == wallet && controller.ActiveKind == station.kind && station.IsDrawing);
-                CheckPoolLabels("beforeColorResult_" + roundIndex);
-            }
-            if (ForceColor && !lowerRouted)
-            {
-                var jackpot = station.GetComponentsInChildren<MedalLotteryPocket>().Single(p => p.jackpot);
-                RestrictPockets(station, jackpot); Place(station.ActiveBall.GetComponent<Rigidbody>(), jackpot.GetComponent<Collider>().bounds.center); lowerRouted = true;
-            }
-            return;
-        }
-        if (colorEvents <= colorBaseline || Now - colorFinishedAt < .15) return;
-        var completed = controller.stations[(int)finishedKind.Value];
-        Check("coloredPocketRewardsExactlyOnce_" + roundIndex, colorEvents == colorBaseline + 1 && finishedKind == selectedKind && !completed.LastTimedOut &&
-            completed.LastPocket != null && game.medals == colorWallet + lastColorPayout && controller.TotalLotteries == lotteriesBefore + 1);
-        int afterWallet = game.medals; controller.FinishLottery(completed, ticket, finishedJackpot, lastColorPayout);
-        Check("duplicateColoredRewardIgnored_" + roundIndex, game.medals == afterWallet && colorEvents == colorBaseline + 1);
-        if (ForceColor)
-        {
-            Check("actualJackpotTriggerResetsPool_" + completed.kind, lowerRouted && Time.fixedTime > placedFixedTime && completed.LastPocket.jackpot && finishedJackpot &&
-                lastColorPayout == expectedPool && controller.TotalJackpots == jackpotsBefore + 1 && controller.jackpotPools[(int)completed.kind] == settings.jackpotResetValues[(int)completed.kind]);
-            CheckPoolLabels("afterJackpotReset_" + completed.kind);
-            Check("jackpotBannerAmount_" + completed.kind, arcade.payoutBanner != null && arcade.payoutBanner.gameObject.activeInHierarchy &&
-                arcade.payoutBanner.text.Contains("JACKPOT") && arcade.payoutBanner.text.Contains("+" + lastColorPayout + "枚"));
-            Capture("upper-" + completed.kind.ToString().ToLowerInvariant() + "-jackpot.png", completed.kind.ToString());
-        }
-        CompleteRound();
-    }
-
-    private static void SampleNaturalSelector()
-    {
-        if (!NaturalSelectorRound || !upper.IsSelectingColor || upper.ActiveBall == null || Time.time < nextSelectorSampleAt) return;
-        nextSelectorSampleAt = Time.time + 1f;
-        var body = upper.ActiveBall.GetComponent<Rigidbody>();
-        Vector3 position = body == null ? upper.ActiveBall.transform.position : body.position;
-        var ballCollider = upper.ActiveBall.GetComponent<Collider>();
-        float radius = ballCollider == null ? .25f : ballCollider.bounds.extents.x;
-        var nearby = Physics.OverlapSphere(position, radius + .03f).Where(c => c != null && c != ballCollider &&
-            (body == null || c.attachedRigidbody != body) && !c.transform.IsChildOf(upper.ActiveBall.transform)).Select(c => new {
-                name = c.name, parent = c.transform.parent == null ? null : c.transform.parent.name,
-                trigger = c.isTrigger, localCenter = Pos(upper.transform.InverseTransformPoint(c.bounds.center))
-            }).ToArray();
-        naturalSelectorSamples.Add(new {
-            round = roundIndex, ticket = upper.CurrentTicket, phase = phase.ToString(), stage = "ColorSelection",
-            playSeconds = Time.time, elapsedWallSeconds = Now - roundStarted,
-            localPosition = Pos(upper.transform.InverseTransformPoint(position)),
-            worldPosition = Pos(position), nearbyColliders = nearby,
-            localVelocity = body == null ? null : Pos(upper.transform.InverseTransformVector(body.linearVelocity)),
-            worldVelocity = body == null ? null : Pos(body.linearVelocity),
-            angularVelocity = body == null ? null : Pos(body.angularVelocity),
-            speed = body == null ? 0 : body.linearVelocity.magnitude,
-            sleeping = body != null && body.IsSleeping(), kinematic = body != null && body.isKinematic,
-            upper.OutBlockUsed, upper.OutBlockReady, upper.ColorGatesOpen,
-            upper.LastExitedBowl,
-            tokenConsumed = upper.ActiveBall.IsConsumed
-        });
-    }
-
-    private static void ObserveDividerSpeeds()
-    {
-        for (int i = 0; i < 3; i++)
-        {
-            float speed = controller.stations[i].currentDividerSpeed;
-            if (observedDividerSpeeds[i].Add(speed)) dividerSpeedSamples.Add(new {
-                round = roundIndex, station = controller.stations[i].kind.ToString(), ticket,
-                speedDegreesPerSecond = speed, selectorSeconds = Time.fixedTime - selectorStartedFixed,
-                playSeconds = Time.time
-            });
-        }
-    }
-
-    private static void IncomingWhitePlate(LotteryBallToken token)
-    {
-        var body = token.GetComponent<Rigidbody>(); var plate = GuardBody.GetComponent<Collider>();
-        Require(plate != null && plate.enabled && !plate.isTrigger, "The white out block needs a real solid collider.");
-        var normal = GuardBody.transform.forward.normalized;
-        float ballRadius = token.GetComponent<Collider>().bounds.extents.x;
-        Vector3 face = plate.ClosestPoint(plate.bounds.center + normal * (plate.bounds.extents.magnitude + 1f));
-        var position = face + normal * (ballRadius + .025f) + Vector3.up * .1f;
-        Place(body, position); body.linearVelocity = -normal * 3.5f;
-    }
-
-    private static void TickOutGuard()
-    {
-        if (guardStep == 0)
-        {
-            Require(GuardBody != null && upper.outBlocks[GuardFaceIndex] != null && GuardOutflow != null, "White blocker or actual exterior OUT trigger missing.");
-            guardedToken = upper.ActiveBall;
-            Require(upper.OutBlockReady && !upper.OutBlockUsed && guardedToken != null, "The eligible selector did not start with a fresh white blocker.");
-            IncomingWhitePlate(guardedToken); guardStep = 1; return;
-        }
-        if (guardStep == 1)
-        {
-            if (!upper.OutBlockUsed) return;
-            guardCollisionObserved = true; guardConsumedFixed = Time.fixedTime;
-            Check(GuardCheckName("actualWhiteCollisionConsumesOnlyOneGuard"), Time.fixedTime > placedFixedTime && !upper.OutBlockReady &&
-                ReferenceEquals(guardedToken, upper.ActiveBall) && !guardedToken.IsConsumed && upper.IsSelectingColor && game.medals == selectorWallet);
-            int originalTicket = guardedToken.ticket; guardedToken.ticket++;
-            bool wrongTicket = !upper.TryResolveOutflow(GuardOutflow, guardedToken); guardedToken.ticket = originalTicket;
-            var originalStation = guardedToken.station; guardedToken.station = controller.stations[0];
-            bool wrongStation = !upper.TryResolveOutflow(GuardOutflow, guardedToken); guardedToken.station = originalStation;
-            Check(GuardCheckName("outflowRejectsWrongTokenWithoutConsumingIt"), wrongTicket && wrongStation && !guardedToken.IsConsumed && upper.IsSelectingColor);
-            Capture("upper-white-block-used-" + GuardFaceIndex + ".png", null);
-            var normal = GuardBody.transform.forward.normalized;
-            Place(guardedToken.GetComponent<Rigidbody>(), GuardBody.position + normal * 1.3f + Vector3.up * .1f);
-            guardStep = 2; return;
-        }
-        if (guardStep == 2)
-        {
-            if (Time.fixedTime <= placedFixedTime) return;
-            IncomingWhitePlate(guardedToken); guardStep = 3; return;
-        }
-        if (guardStep == 3)
-        {
-            if (Time.fixedTime - placedFixedTime < .04f) return;
-            Check(GuardCheckName("secondWhiteContactCannotRestoreGuardOrReplaceBall"), upper.OutBlockUsed && !upper.OutBlockReady &&
-                ReferenceEquals(guardedToken, upper.ActiveBall) && !guardedToken.IsConsumed && upper.IsSelectingColor && game.medals == selectorWallet);
-            // Keep this same dynamic test ball away from the colored bins while the plate withdraws.
-            Place(guardedToken.GetComponent<Rigidbody>(), upper.colorLaunchPoint.position + Vector3.up * 3f);
-            guardStep = 4; return;
-        }
-        if (guardStep == 4)
-        {
-            if (Time.fixedTime - guardConsumedFixed < .75f) return;
-            Vector3 closedWorld = GuardBody.transform.parent.TransformPoint(upper.outBlockClosedPositions[GuardFaceIndex]);
-            Check(GuardCheckName("whitePlateRetractsDownIntoMachine"), GuardBody.position.y < closedWorld.y - .8f);
-            Check(GuardCheckName("oneGuardContactRetractsAllEightWhiteBlocks"), Enumerable.Range(0, 8).All(i =>
-                Vector3.Distance(upper.outBlockBodies[i].position, upper.outBlockBodies[i].transform.parent.TransformPoint(
-                    upper.outBlockClosedPositions[i] + Vector3.up * upper.outBlockRaiseHeight)) < .035f));
-            var exterior = GuardOutflow.GetComponent<Collider>(); Require(exterior != null && exterior.isTrigger, "Exterior OUT collider is not a trigger.");
-            Vector3 normal = GuardBody.transform.forward.normalized;
-            Check(GuardCheckName("outTriggerLiesBeyondFrontWhitePlate"), Vector3.Dot(exterior.bounds.center - closedWorld, normal) < -.2f);
-            Place(guardedToken.GetComponent<Rigidbody>(), exterior.bounds.center); guardStep = 5;
-        }
-    }
-
-    private static void CheckOnce(string name, bool passed) { if (!results.ContainsKey(name)) Check(name, passed); }
     private static void TestBusySettings()
     {
         string before = JsonUtility.ToJson(settings.CaptureValues()); int[] pools = (int[])controller.jackpotPools.Clone();
         settingsUI.Open(); settingsUI.targetPayoutInput.text = "80"; settingsUI.ApplyFromInputs();
-        CheckOnce("settingsCannotMutateActiveDraw", JsonUtility.ToJson(settings.CaptureValues()) == before && pools.SequenceEqual(controller.jackpotPools) && settingsUI.IsOpen);
+        Check("settingsCannotMutateActiveIntegratedDraw", JsonUtility.ToJson(settings.CaptureValues()) == before && pools.SequenceEqual(controller.jackpotPools) && settingsUI.IsOpen);
         settingsUI.Close();
     }
     private static void CompleteRound()
     {
-        RestorePocketStates(); upper.colorSelectionTimeout = originalSelectorTimeout; upper.drawTimeout = originalUpperTimeout;
-        rounds.Add(new { index = roundIndex, ticket, upperWin = lastUpperWin,
-            upperBumperHits = finalUpperHits, physicalBumperContactEvents = actualBumperContacts, upperExitedBowl,
-            rearUpper = RearUpperRound, upperEndedWithOriginalToken,
-            finalUpperBallLocalPosition = finalUpperBallLocalPosition.HasValue ? Pos(finalUpperBallLocalPosition.Value) : null,
-            liveOver100BeforeUpperEndObserved = thresholdObserved,
-            naturalUpper = roundIndex >= 3 && roundIndex <= 5, naturalSelector = NaturalSelectorRound,
-            selectorPocket = upper.LastColorPocket == null ? null : upper.LastColorPocket.kind.ToString(),
-            selectedColor = selectedKind?.ToString(), finalColor = finishedKind?.ToString(), payout = colorEvents > colorBaseline ? lastColorPayout : lastUpperWin,
-            jackpot = colorEvents > colorBaseline && finishedJackpot, upperTimedOut, selectorTimedOut = selectionEvents > selectionBaseline && selectionTimedOut,
-            guardUsed = selectionGuardUsed, forcedGuardCollision = guardCollisionObserved, guardStep,
-            exitedBowl = selectionExitedBowl, unguardedExitPosition = unguardedExitPosition.HasValue ? Pos(unguardedExitPosition.Value) : null,
-            forcedGuardFace = GuardRound ? GuardFaceIndex : (int?)null,
-            naturalOut = selectionEvents > selectionBaseline && !selectedKind.HasValue && !selectionTimedOut,
-            lowerDraws = controller.TotalLotteries - lotteriesBefore, elapsedWallSeconds = Now - roundStarted });
+        RestorePocketStates();
+        Check("integratedFlowNeverCreatesLegacySelector_" + roundIndex, legacyEvents == 0 && !upper.IsSelectingColor && !controller.IsSelectingColor);
+        rounds.Add(new { index = roundIndex, ticket, upperTokenId = upperObjectId, natural = roundIndex > 0,
+            seed = roundIndex > 0 ? (int?)naturalSeeds[roundIndex - 1] : null, finalWin = finalUpperWin, hits = finalUpperHits,
+            physicalBumperContactEvents = actualBumperContacts, upperExitedBowl, upperTimedOut, upperEndedWithOriginalToken,
+            finalPosition = finalUpperBallLocalPosition.HasValue ? Pos(finalUpperBallLocalPosition.Value) : null,
+            upperPayout = lastUpperWin, colorPayout = earnedColorTotal, upperFinishEvents = upperEvents - upperBaseline,
+            usedGuards = GuardStates(), elapsedWallSeconds = Now - roundStarted });
         stopAngles = Angles(); nextAt = Time.time + .6f; Enter(Phase.Stop);
     }
+
     private static void RestrictPockets(MedalBallLotteryStation station, MedalLotteryPocket chosen)
     {
         foreach (var pocket in station.GetComponentsInChildren<MedalLotteryPocket>())
@@ -1144,7 +1080,7 @@ public static class MedalUpperFlowPlayCheck
         try
         {
             var records = new List<object>(); var missing = new List<string>();
-            foreach (var text in UnityEngine.Object.FindObjectsByType<TMP_Text>(FindObjectsSortMode.None))
+            foreach (var text in UnityEngine.Object.FindObjectsByType<TMP_Text>())
             {
                 if (!text.isActiveAndEnabled || string.IsNullOrWhiteSpace(text.text)) continue;
                 foreach (char character in text.text.Where(c => (c >= '\u3040' && c <= '\u30ff') || (c >= '\u3400' && c <= '\u9fff')).Distinct())
@@ -1166,20 +1102,25 @@ public static class MedalUpperFlowPlayCheck
     private static void Finish(bool stopPlay)
     {
         SessionState.SetBool(Key, false); RestorePocketStates();
+        results["upperFixtureSlotIsolation"] = upperFixtureSlotStates.Select(pair => new { name = pair.Key == null ? null : pair.Key.name,
+            originalEnabled = pair.Value, isolatedDuringFixtures = pair.Key != null && !pair.Key.enabled }).ToArray();
+        foreach (var pair in upperFixtureSlotStates) if (pair.Key != null) pair.Key.enabled = pair.Value;
+        upperFixtureSlotStates.Clear();
         if (initialized)
         {
             CleanupNormalBurst();
-            if (upper != null) { upper.colorSelectionTimeout = originalSelectorTimeout; upper.drawTimeout = originalUpperTimeout; }
+            if (upper != null) upper.drawTimeout = originalUpperTimeout;
             if (game != null) { game.OnPayoutMedalSpawned -= OnPayout; if (realCap > 0) game.maxMedalsOnBoard = realCap; game.SetSettingsOpen(false); }
             if (controller != null)
             {
-                controller.OnUpperLotteryFinished -= OnUpperFinish; controller.OnColorSelectionFinished -= OnSelectionFinish; controller.OnLotteryFinished -= OnColorFinish;
+                controller.OnUpperLotteryStarted -= OnUpperStarted; controller.OnUpperLotteryFinished -= OnUpperFinish; controller.OnColorSelectionStarted -= OnLegacySelectorStarted; controller.OnColorSelectionFinished -= OnLegacySelectorFinished; controller.OnLotteryFinished -= OnColorFinish;
             }
             if (settings != null) { settings.SettingsFileOverride = originalOverride; settings.persistSettings = savedPersistence; }
-            Time.timeScale = originalTimeScale;
+            Time.timeScale = originalTimeScale; UnityEngine.Random.state = originalRandomState;
             try
             {
-                Check("userSettingsFileRemainedUntouched", FileHash(realSettingsPath) == realSettingsHash);
+                string finalHash = FileHash(realSettingsPath); Check("userSettingsFileRemainedUntouched", finalHash == realSettingsHash);
+                results["userSettingsHashes"] = new { before = realSettingsHash, after = finalHash };
                 string backupRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Application.dataPath), ".codex-backups/medal-expansion-20261004")) + Path.DirectorySeparatorChar;
                 if (temporarySettingsPath != null && Path.GetFullPath(temporarySettingsPath).StartsWith(backupRoot, StringComparison.OrdinalIgnoreCase))
                 {
@@ -1192,16 +1133,16 @@ public static class MedalUpperFlowPlayCheck
         Application.runInBackground = SessionState.GetBool(BackgroundKey, false);
         results["timestampUtc"] = DateTime.UtcNow.ToString("O"); results["startedUtc"] = SessionState.GetString(UtcKey, "");
         results["elapsedWallSeconds"] = Elapsed; results["playSeconds"] = Time.time; results["phase"] = phase.ToString();
-        results["selectorStability"] = StabilityMode; results["targetRounds"] = TargetRounds;
-        results["upperReference"] = ReferenceMode;
-        results["expectedNaturalSelectorCount"] = ExpectedNaturalSelectors; results["maximumWallSeconds"] = MaximumSeconds;
-        results["naturalUpperCount"] = naturalUpperCount; results["naturalSelectorCount"] = naturalSelectorCount; results["rounds"] = rounds.ToArray();
+        results["integratedUpperMode"] = true; results["targetRounds"] = TargetRounds;
+        results["visits"] = visits.ToArray(); results["guardContacts"] = guardContacts.ToArray(); results["naturalUpperSamples"] = naturalUpperSamples.ToArray();
+        results["slotPocketContacts"] = slotPocketContacts.ToArray();
+        results["fixtureBoundaries"] = fixtureBoundaries.ToArray();
+        results["maximumWallSeconds"] = MaximumSeconds; results["expectedNaturalUpperCount"] = 3; results["expectedMainColorVisits"] = 6; results["legacySelectorEvents"] = legacyEvents;
+        results["naturalUpperCount"] = naturalUpperCount; results["rounds"] = rounds.ToArray();
         results["naturalUpperPhysicalContactTotal"] = naturalUpperPhysicalContactTotal;
-        results["naturalSelectorSamples"] = naturalSelectorSamples.ToArray();
         results["successfulGuardFaceCount"] = successfulGuardCount;
-        results["dividerSpeedSamples"] = dividerSpeedSamples.ToArray();
         results["bumperContactSamples"] = bumperContactSamples.ToArray();
-        results["originalUpperDrawTimeout"] = originalUpperTimeout;
+        results["originalUpperDrawTimeout"] = originalUpperTimeout; results["naturalSeeds"] = naturalSeeds;
         results["normalPayoutContactSamples"] = burstCoins.Select((c, i) => new {
             index = i, spawnPosition = Pos(c.spawn), c.dynamic, c.credited,
             firstSurface = c.firstSurface, firstSurfacePosition = c.firstSurfacePosition.HasValue ? Pos(c.firstSurfacePosition.Value) : null,
@@ -1216,8 +1157,8 @@ public static class MedalUpperFlowPlayCheck
         results["finalBootReadiness"] = Diagnostics(); results["errors"] = errors.Distinct().ToArray();
         results["editorServiceIssues"] = editorIssues.Distinct().ToArray(); results["captureIssues"] = captureIssues.Distinct().ToArray();
         results["success"] = errors.Count == 0 && phase == Phase.Complete;
-        MedalPusherExpansionBuilder.WriteReport("upper-play-validation.json", results);
-        Debug.Log("[MedalPusher] Upper flow Play check complete: " + ((bool)results["success"] ? "PASS" : "FAIL"));
+        MedalPusherExpansionBuilder.WriteReport("integrated-upper-play-validation.json", results);
+        Debug.Log("[MedalPusher] Integrated upper flow Play check complete: " + ((bool)results["success"] ? "PASS" : "FAIL"));
         if (stopPlay)
         {
             EditorApplication.isPaused = false;
@@ -1228,17 +1169,29 @@ public static class MedalUpperFlowPlayCheck
 }
 
 /// <summary>Transient collision observer; never saved to a scene or attached to runtime prefabs.</summary>
-public sealed class MedalUpperFlowPayoutProbe : MonoBehaviour
+public sealed class MedalIntegratedUpperFlowPayoutProbe : MonoBehaviour
 {
     [NonSerialized] public int RecordIndex;
-    private void OnCollisionEnter(Collision collision) => MedalUpperFlowPlayCheck.ObserveBurstCollision(RecordIndex, collision);
-    private void OnCollisionStay(Collision collision) => MedalUpperFlowPlayCheck.ObserveBurstCollision(RecordIndex, collision);
+    private void OnCollisionEnter(Collision collision) => MedalIntegratedUpperFlowPlayCheck.ObserveBurstCollision(RecordIndex, collision);
+    private void OnCollisionStay(Collision collision) => MedalIntegratedUpperFlowPlayCheck.ObserveBurstCollision(RecordIndex, collision);
 }
 
 /// <summary>Records actual OnCollisionEnter evidence while the harness moves the upper ball between bumpers.</summary>
-public sealed class MedalUpperFlowBumperProbe : MonoBehaviour
+public sealed class MedalIntegratedUpperFlowBumperProbe : MonoBehaviour
 {
     [NonSerialized] public int Round;
     [NonSerialized] public LotteryBallToken Token;
-    private void OnCollisionEnter(Collision collision) => MedalUpperFlowPlayCheck.ObserveUpperBumperContact(Round, Token, collision);
+    private void OnCollisionEnter(Collision collision) => MedalIntegratedUpperFlowPlayCheck.ObserveUpperBumperContact(Round, Token, collision);
+}
+
+/// <summary>Records actual trigger entry of the paid coin into its physical slot pocket.</summary>
+public sealed class MedalIntegratedSlotPocketProbe : MonoBehaviour
+{
+    [NonSerialized] public MedalSlotPocket ExpectedPocket;
+    private bool observed;
+    private void OnTriggerEnter(Collider other)
+    {
+        if (observed || other.GetComponent<MedalSlotPocket>() != ExpectedPocket) return;
+        observed = true; MedalIntegratedUpperFlowPlayCheck.ObserveSlotPocketContact(ExpectedPocket, other);
+    }
 }

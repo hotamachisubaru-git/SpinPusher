@@ -13,6 +13,7 @@ public static class MedalLotteryStationBuilder
     public const string GreenMaterialPath = Root + "/Materials/DrawGreen.mat";
     public static Material GreenBallMaterial => green;
     private static Material gold, white, black, ruby, sapphire, amber, green;
+    private static Material upperClear, upperCrystal, upperPurple, upperGlow;
     private static PhysicsMaterial surfacePhysics;
     private static TMP_FontAsset font;
     private static GameObject ballPrefab;
@@ -48,6 +49,10 @@ public static class MedalLotteryStationBuilder
         sapphire = MakeMaterial("DrawSapphire", new Color(.025f, .50f, 1f), .25f, .5f);
         amber = MakeMaterial("DrawAmber", new Color(1f, .78f, .045f), .25f, .5f);
         green = MakeMaterial("DrawGreen", new Color(.035f, .94f, .30f), .18f, .45f);
+        upperClear = MakeTransparentMaterial("DrawUpperClear", new Color(.72f, .91f, 1f, .18f), .91f);
+        upperCrystal = MakeTransparentMaterial("DrawUpperCrystal", new Color(.90f, .97f, 1f, .64f), .88f);
+        upperPurple = MakeMaterial("DrawUpperPurple", new Color(.51f, .16f, .78f), .12f, .18f);
+        upperGlow = MakeMaterial("DrawUpperGlow", new Color(.88f, .97f, 1f), .02f, .32f);
         surfacePhysics = MakePhysics("DrawSurface", .035f, .02f, .10f);
         font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>("Assets/Synaptic_Generated/MedalPusher/Fonts/MedalJapanese SDF.asset")
             ?? AssetDatabase.LoadAssetAtPath<TMP_FontAsset>("Assets/SourceFiles/Fonts/Inter-Variable SDF.asset")
@@ -61,7 +66,7 @@ public static class MedalLotteryStationBuilder
         if (field == null) throw new ArgumentNullException(nameof(field));
         if (EditorApplication.isPlayingOrWillChangePlaymode)
             throw new InvalidOperationException("Stop Play mode before rebuilding the upper lottery.");
-        if (ballPrefab == null || green == null || surfacePhysics == null) PrepareAssets();
+        if (ballPrefab == null || green == null || surfacePhysics == null || upperClear == null) PrepareAssets();
         var decor = field.Find("TreasureCabinetDecor");
         if (decor == null || decor.Find("FourSidedTreasureTower") == null)
             throw new InvalidOperationException("Build the central treasure tower before its upper lottery.");
@@ -90,13 +95,11 @@ public static class MedalLotteryStationBuilder
         station.isUpperStation = true;
         station.rotationEnabled = false;
         station.lotteryBallPrefab = ballPrefab;
-        station.drawTimeout = 10f;
+        station.drawTimeout = 60f;
+        station.usesBumpers = true;
         const float centerZ = -.55f;
-        BuildFunnel(station, "DrawUpperFunnel", 2.48f, 1.12f, 1.53f, .30f, centerZ, green);
-        BuildRadialPockets(station, 8, centerZ, Array.Empty<int>(), new[] { 20, 40, 60, 80, 100, 120, 150, 200 }, green);
-        var winPockets = module.GetComponentsInChildren<MedalLotteryPocket>();
-        station.normalWinPocketTriggers = new Collider[winPockets.Length];
-        for (int i = 0; i < winPockets.Length; i++) station.normalWinPocketTriggers[i] = winPockets[i].GetComponent<Collider>();
+        BuildUpperBumpers(station, centerZ);
+        station.normalWinPocketTriggers = Array.Empty<Collider>();
         BuildSweeper(station, centerZ, 25f, green, false);
         ConfigureLaunch(station, green, centerZ);
         for (int side = -1; side <= 1; side += 2)
@@ -107,25 +110,95 @@ public static class MedalLotteryStationBuilder
         Box("UpperDrawHeaderBacking", module, new Vector3(0, 2.82f, 2.24f), new Vector3(5.58f, .57f, .22f), black, false);
         Box("UpperDrawHeaderTop", module, new Vector3(0, 3.17f, 2.24f), new Vector3(5.95f, .12f, .43f), gold, false);
         Box("UpperDrawHeaderLight", module, new Vector3(0, 2.49f, 2.08f), new Vector3(5.48f, .075f, .045f), green, false);
-        Label("DrawTitle", module, "上段ボール抽選", new Vector3(0, 2.84f, 2.11f), new Vector2(5.3f, .48f), 3.8f, Color.white);
-        BuildColorSelectionStage(station);
+        station.upperWinText = Label("DrawTitle", module, "00WIN（枚獲得）", new Vector3(0, 2.84f, 2.11f), new Vector2(5.3f, .48f), 3.8f, Color.white);
+        BuildUpperColorPorts(station, centerZ);
+        BuildUpperOutGuards(station, centerZ);
         AssetDatabase.SaveAssets();
         return station;
     }
 
-    private static void BuildColorSelectionStage(MedalBallLotteryStation station)
+    private static void BuildUpperBumpers(MedalBallLotteryStation station, float centerZ)
     {
-        const float centerZ = -5.3f;
         var parent = station.transform;
-        var stage = Group("ColorSelectionStage", parent);
-        BuildFunnel(station, "DrawColorSelectionFunnel", 1.95f, 1.12f, 1.40f, .30f, centerZ, green, stage, true);
-        for (int side = -1; side <= 1; side += 2)
+        // The reference uses a broad flat disk, with open front/rear OUT lanes.
+        var floor = Cylinder("UpperBumperPlayFloor", parent, new Vector3(0f, .14f, centerZ), 2.43f, .12f, black, false);
+        var floorCollider = floor.gameObject.AddComponent<MeshCollider>();
+        floorCollider.sharedMesh = floor.GetComponent<MeshFilter>().sharedMesh;
+        floorCollider.sharedMaterial = surfacePhysics;
+        BuildUpperRim(parent, centerZ);
+        BuildUpperFloorSectors(parent, centerZ);
+        var crystalMesh = CrystalCapMesh();
+        station.bumpers = new MedalLotteryBumper[4];
+        for (int i = 0; i < 4; i++)
         {
-            Box("ColorSelectionFrontSupport", stage, new Vector3(side * 1.55f, -.42f, centerZ), new Vector3(.15f, .72f, .15f), white, false);
-            var brace = Box("ColorSelectionGoldBrace", stage, new Vector3(side * 1.55f, -.72f, -4.35f), new Vector3(.10f, 2.15f, .10f), gold, false);
-            brace.localRotation = Quaternion.FromToRotation(Vector3.up, new Vector3(0, .65f, -2f));
+            float x = (i % 2 == 0 ? -1f : 1f) * .65f;
+            float z = (i < 2 ? -1f : 1f) * .65f;
+            Cylinder("BumperBlackFoot", parent, new Vector3(x, .27f, centerZ + z), .30f, .14f, black, false);
+            Cylinder("BumperGoldCollar", parent, new Vector3(x, .38f, centerZ + z), .325f, .10f, gold, false);
+            var sphere = Sphere("UpperBumper_" + i, parent, new Vector3(x, .52f, centerZ + z), Vector3.one * .64f, white, true);
+            sphere.GetComponent<Renderer>().enabled = false;
+            var bumper = sphere.gameObject.AddComponent<MedalLotteryBumper>();
+            bumper.station = station;
+            station.bumpers[i] = bumper;
+            var cap = MeshDecoration("BumperCrystalCap_" + i, parent, new Vector3(x, .52f, centerZ + z), crystalMesh, upperCrystal);
+            var core = MeshDecoration("BumperCrystalGlow_" + i, cap, Vector3.zero, crystalMesh, upperGlow);
+            core.localScale = new Vector3(.72f, .80f, .72f);
         }
+        var exit = Group("UpperPhysicalOutflow", parent);
+        exit.localPosition = new Vector3(0f, .55f, centerZ - 2.95f);
+        var exitCollider = exit.gameObject.AddComponent<BoxCollider>();
+        exitCollider.size = new Vector3(2.48f, 3.40f, .38f);
+        exitCollider.isTrigger = true;
+        station.upperOutflow = exit.gameObject.AddComponent<MedalLotteryOutflow>();
+        station.upperOutflow.station = station;
+        station.bumperBowlOuterRadius = 2.48f;
+        station.bumperBowlFloorY = -.75f;
+    }
 
+    private static void BuildUpperRim(Transform parent, float centerZ)
+    {
+        const int segments = 24;
+        const float radius = 2.46f;
+        for (int i = 0; i < segments; i++)
+        {
+            float angle = i * Mathf.PI * 2f / segments;
+            // Three narrow color ports replace cardinal rim sections. The
+            // broad front opening holds four independently retracting plates.
+            if (i == 0 || i == 6 || i == 12 || (i >= 16 && i <= 20)) continue;
+            Vector3 radial = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+            float width = radius * .275f;
+            var lower = Box("UpperBlackRim", parent, new Vector3(0f, .26f, centerZ) + radial * radius,
+                new Vector3(width, .17f, .12f), black, true);
+            lower.localRotation = Quaternion.Euler(0f, -angle * Mathf.Rad2Deg - 90f, 0f);
+            var trim = Box("UpperGoldRimTrim", parent, new Vector3(0f, .36f, centerZ) + radial * radius,
+                new Vector3(width, .035f, .135f), gold, false);
+            trim.localRotation = lower.localRotation;
+            var guard = Box("UpperClearRimGuard", parent, new Vector3(0f, .62f, centerZ) + radial * radius,
+                new Vector3(width, .50f, .075f), upperClear, true);
+            guard.localRotation = lower.localRotation;
+            if (i % 2 == 0)
+                Sphere("UpperRimBolt", parent, new Vector3(0f, .365f, centerZ) + radial * (radius - .02f), Vector3.one * .09f, gold, false);
+        }
+    }
+
+    private static void BuildUpperFloorSectors(Transform parent, float centerZ)
+    {
+        Vector3 position = new Vector3(0f, .207f, centerZ);
+        MeshDecoration("UpperRedLeftSector", parent, position, SectorMesh("DrawUpperRedSector", .34f, 2.31f, 151f, 209f), ruby);
+        MeshDecoration("UpperBlueRightSector", parent, position, SectorMesh("DrawUpperBlueSector", .34f, 2.31f, -29f, 29f), sapphire);
+        MeshDecoration("UpperYellowRearSector", parent, position, SectorMesh("DrawUpperYellowRear", .34f, 2.31f, 61f, 119f), amber);
+        MeshDecoration("UpperPurpleFrontSector", parent, position, SectorMesh("DrawUpperPurpleFront", .34f, 2.31f, 241f, 299f), upperPurple);
+        for (int i = 0; i < 4; i++)
+        {
+            float start = 31f + i * 90f;
+            MeshDecoration("UpperGoldFan_" + i, parent, position, SectorMesh("DrawUpperGoldFan_" + i, .34f, 2.31f, start, start + 28f), gold);
+        }
+        Cylinder("UpperCentralRedDisk", parent, new Vector3(0f, .219f, centerZ), .34f, .022f, ruby, false);
+        Cylinder("UpperCentralGoldDot", parent, new Vector3(0f, .235f, centerZ), .065f, .013f, gold, false);
+    }
+
+    private static void BuildUpperColorPorts(MedalBallLotteryStation station, float centerZ)
+    {
         station.colorRoutePockets = new MedalColorRoutePocket[3];
         station.colorGateBodies = new Rigidbody[3];
         station.colorGateClosedPositions = new Vector3[3];
@@ -133,133 +206,81 @@ public static class MedalLotteryStationBuilder
         var directions = new[] { Vector3.left, Vector3.right, Vector3.forward };
         for (int i = 0; i < 3; i++)
         {
-            var pocketGroup = Group("ColorRoutePocket_" + (MedalJackpotKind)i, stage);
-            pocketGroup.localPosition = new Vector3(directions[i].x * .84f, 0f, centerZ + directions[i].z * .84f);
-            pocketGroup.localRotation = Quaternion.FromToRotation(Vector3.forward, directions[i]);
-            Box("ColorRouteCup", pocketGroup, new Vector3(0, -.36f, 0), new Vector3(.88f, .12f, 1.04f), colors[i], true);
-            var trigger = Group("ColorRouteTrigger", pocketGroup);
-            trigger.localPosition = new Vector3(0, .04f, 0);
-            var triggerCollider = trigger.gameObject.AddComponent<BoxCollider>();
-            triggerCollider.size = new Vector3(.78f, .66f, .92f);
-            triggerCollider.isTrigger = true;
+            var port = Group("UpperColorPort_" + (MedalJackpotKind)i, station.transform);
+            port.localPosition = new Vector3(0f, 0f, centerZ) + directions[i] * 2.40f;
+            port.localRotation = Quaternion.FromToRotation(Vector3.forward, directions[i]);
+            // A level extension catches the sphere beyond the disk edge. Its
+            // entrance is sealed by a real vertical gate until live WIN > 100.
+            Box("ColorPortFloor", port, new Vector3(0f, .14f, .22f), new Vector3(.64f, .12f, .78f), colors[i], true);
+            for (int side = -1; side <= 1; side += 2)
+                Box("ColorPortSideRail", port, new Vector3(side * .36f, .59f, .18f), new Vector3(.08f, .78f, .80f), gold, true);
+            var gate = Box("ColorGate_" + (MedalJackpotKind)i, port, new Vector3(0f, .65f, 0f),
+                new Vector3(.68f, .90f, .12f), colors[i], true);
+            var body = gate.gameObject.AddComponent<Rigidbody>();
+            ConfigureKinematicBody(body);
+            var trigger = Group("ColorRouteTrigger", port);
+            trigger.localPosition = new Vector3(0f, .44f, .20f);
+            var collider = trigger.gameObject.AddComponent<BoxCollider>();
+            collider.size = new Vector3(.56f, .90f, .30f);
+            collider.isTrigger = true;
             var pocket = trigger.gameObject.AddComponent<MedalColorRoutePocket>();
             pocket.station = station;
             pocket.kind = (MedalJackpotKind)i;
-            var gate = Box("ColorGate_" + pocket.kind, pocketGroup, new Vector3(0, .46f, 0), new Vector3(.93f, .12f, 1.08f), colors[i], true);
-            var gateBody = gate.gameObject.AddComponent<Rigidbody>();
-            gateBody.isKinematic = true;
-            gateBody.useGravity = false;
-            gateBody.interpolation = RigidbodyInterpolation.Interpolate;
-            gateBody.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
-            pocket.gateBody = gateBody;
+            pocket.gateBody = body;
             station.colorRoutePockets[i] = pocket;
-            station.colorGateBodies[i] = gateBody;
+            station.colorGateBodies[i] = body;
             station.colorGateClosedPositions[i] = gate.localPosition;
-            Box("GateGoldHandle", gate, new Vector3(0, .55f, 0), new Vector3(.24f, .30f, .18f), gold, false);
+            Box("ColorGateGoldTrim", gate, new Vector3(0f, .52f, 0f), new Vector3(.70f, .045f, .14f), gold, false);
         }
+        station.colorGateRaiseHeight = 1.20f;
+        station.colorGateMoveSpeed = 4f;
+        // The upper disk is the only color selection stage; no transfer ball
+        // or second front tray is generated.
+        station.colorLaunchPoint = null;
+        station.colorGuideLocalCenter = new Vector3(0f, 0f, centerZ);
+        station.colorBowlOuterRadius = station.bumperBowlOuterRadius;
+        station.colorBowlFloorY = station.bumperBowlFloorY;
+    }
+
+    private static void BuildUpperOutGuards(MedalBallLotteryStation station, float centerZ)
+    {
+        station.outBlocks = new MedalOutBlock[4];
+        station.outBlockBodies = new Rigidbody[4];
+        station.outBlockClosedPositions = new Vector3[4];
         for (int i = 0; i < 4; i++)
         {
-            float angle = (45f + i * 90f) * Mathf.Deg2Rad;
-            // A low sloping fin drains off its top toward the real pocket
-            // entrances, rather than wedging a ball above the bowl/chute rail.
-            var divider = Box("ColorRouteDivider", stage, new Vector3(Mathf.Cos(angle) * 1.10f, -.06f, centerZ + Mathf.Sin(angle) * 1.10f), new Vector3(.06f, .32f, .90f), white, true);
-            divider.localRotation = Quaternion.Euler(0, 90f - angle * Mathf.Rad2Deg, 0) * Quaternion.Euler(-30f, 0, 0);
+            float x = -.90f + i * .60f;
+            var plate = Box("WhiteOutBlock_" + i, station.transform, new Vector3(x, .55f, centerZ - 2.44f),
+                new Vector3(.56f, 1.20f, .12f), white, true);
+            var body = plate.gameObject.AddComponent<Rigidbody>();
+            ConfigureKinematicBody(body);
+            var block = plate.gameObject.AddComponent<MedalOutBlock>();
+            block.station = station;
+            block.guardIndex = i;
+            station.outBlocks[i] = block;
+            station.outBlockBodies[i] = body;
+            station.outBlockClosedPositions[i] = plate.localPosition;
+            Box("OutBlockRetractionHousing_" + i, station.transform, new Vector3(x, -.91f, centerZ - 2.44f),
+                new Vector3(.59f, 1.65f, .24f), black, false);
         }
-        // The front sector is cut from the bowl. A descending physical chute
-        // leads through the one-use plate to an OUT trigger beyond the outer rim.
-        // The rear edge is embedded inside the central dome. A ball therefore
-        // meets a continuous descending face, rather than a lip opposing it.
-        var ramp = Box("PhysicalOutflowRamp", stage, new Vector3(0, -.04f, -6.70f), new Vector3(.99f, .12f, 2.52f), white, true);
-        ramp.localRotation = Quaternion.Euler(-14f, 0, 0);
-        for (int side = -1; side <= 1; side += 2)
-            Box("OutflowSideRail", stage, new Vector3(side * .55f, .20f, -6.90f), new Vector3(.08f, 1.08f, 2.03f), gold, true);
-        var plate = Box("WhiteOutBlock", stage, new Vector3(0, .40f, -7.26f), new Vector3(.91f, 1.30f, .13f), white, true);
-        var plateBody = plate.gameObject.AddComponent<Rigidbody>();
-        plateBody.isKinematic = true;
-        plateBody.useGravity = false;
-        plateBody.interpolation = RigidbodyInterpolation.Interpolate;
-        plateBody.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
-        station.outBlockBody = plateBody;
-        station.outBlockClosedPosition = plate.localPosition;
-        station.outBlock = plate.gameObject.AddComponent<MedalOutBlock>();
-        station.outBlock.station = station;
-        Label("OutBlockMark", plate, "ガード\n1", new Vector3(0, 0, -.57f), new Vector2(.70f, .68f), 1.8f, new Color(.04f, .08f, .10f));
-        station.outBlockText = plate.Find("OutBlockMark").GetComponent<TMP_Text>();
-        Box("OutBlockRetractionHousing", stage, new Vector3(0, -.99f, -7.26f), new Vector3(1.08f, 1.50f, .26f), black, false);
-        var exit = Group("ActualOutsideOutflow", stage);
-        exit.localPosition = new Vector3(0, -.18f, -7.76f);
-        var exitCollider = exit.gameObject.AddComponent<BoxCollider>();
-        exitCollider.size = new Vector3(.83f, 1.0f, .38f);
-        exitCollider.isTrigger = true;
-        station.outflow = exit.gameObject.AddComponent<MedalLotteryOutflow>();
-        station.outflow.station = station;
-        ConfigurePerimeterGuards(station, stage, centerZ);
-        Box("ColorSelectionTitleBacking", stage, new Vector3(0, 2.15f, -3.22f), new Vector3(4.24f, .49f, .14f), black, false);
-        Label("ColorSelectionTitle", stage, "色選択", new Vector3(0, 2.15f, -3.31f), new Vector2(3.9f, .42f), 3.5f, Color.white);
-        station.colorLaunchPoint = Group("ColorLaunchPoint", parent);
-        station.colorLaunchPoint.localPosition = new Vector3(0, 2.05f, centerZ);
-        Box("GreenBallTransferPort", station.colorLaunchPoint, new Vector3(0, .24f, 0), new Vector3(.72f, .12f, .50f), green, false);
-        station.colorSelectionTimeout = 10f;
-        station.colorGateRaiseHeight = 1.1f;
-        station.colorGateMoveSpeed = 4f;
-        station.colorLaunchVelocity = new Vector3(0f, -.08f, 0f);
-        station.colorLaunchVelocityJitter = new Vector3(1.15f, 0f, 1.15f);
-        station.colorLaunchPositionJitter = new Vector3(.12f, 0f, .12f);
-        station.colorGuideLocalCenter = new Vector3(0f, 0f, centerZ);
-        station.colorBowlOuterRadius = 1.95f;
-        station.colorBowlFloorY = -.75f;
+        // Single aliases remain available for existing tooling; all four
+        // independent plates protect the same front OUT lane.
+        station.outBlock = station.outBlocks[0];
+        station.outBlockBody = station.outBlockBodies[0];
+        station.outBlockClosedPosition = station.outBlockClosedPositions[0];
+        station.outflow = station.upperOutflow;
+        station.outflows = new[] { station.upperOutflow };
+        station.outBlockText = null;
         station.outBlockRetractionDelay = .18f;
         station.outBlockRaiseHeight = -1.65f;
     }
 
-    private static void ConfigurePerimeterGuards(MedalBallLotteryStation station, Transform stage, float centerZ)
+    private static void ConfigureKinematicBody(Rigidbody body)
     {
-        // Index zero remains the original front plate/exit for callers that use the aliases.
-        var blocks = new List<MedalOutBlock> { station.outBlock };
-        var bodies = new List<Rigidbody> { station.outBlockBody };
-        var closedPositions = new List<Vector3> { station.outBlockClosedPosition };
-        var exits = new List<MedalLotteryOutflow> { station.outflow };
-        int wallCount = stage.childCount;
-        for (int i = 0; i < wallCount; i++)
-        {
-            Transform wall = stage.GetChild(i);
-            if (wall.name != "BowlOuterWall") continue;
-            var renderer = wall.GetComponent<Renderer>();
-            bool becomesGuard = renderer.sharedMaterial == green;
-            // Narrow fixed gold panels leave a .589-wide opening when a white
-            // guard retracts, enough for the actual .52-diameter lottery ball.
-            wall.localScale = new Vector3(becomesGuard ? .62f : .40f, .55f, .13f);
-            if (!becomesGuard) continue;
-            wall.name = "WhitePerimeterGuard_" + blocks.Count;
-            renderer.sharedMaterial = white;
-            var body = wall.gameObject.AddComponent<Rigidbody>();
-            body.isKinematic = true;
-            body.useGravity = false;
-            body.interpolation = RigidbodyInterpolation.Interpolate;
-            body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
-            var block = wall.gameObject.AddComponent<MedalOutBlock>();
-            block.station = station;
-            blocks.Add(block);
-            bodies.Add(body);
-            closedPositions.Add(wall.localPosition);
-
-            Vector3 outward = wall.localPosition - new Vector3(0f, 0f, centerZ);
-            outward.y = 0f;
-            outward.Normalize();
-            var exit = Group("ActualPerimeterOutflow_" + (blocks.Count - 1), stage);
-            exit.localPosition = new Vector3(0f, .85f, centerZ) + outward * 2.48f;
-            exit.localRotation = wall.localRotation;
-            var collider = exit.gameObject.AddComponent<BoxCollider>();
-            collider.size = new Vector3(.64f, 3.25f, .32f);
-            collider.isTrigger = true;
-            var outflow = exit.gameObject.AddComponent<MedalLotteryOutflow>();
-            outflow.station = station;
-            exits.Add(outflow);
-        }
-        station.outBlocks = blocks.ToArray();
-        station.outBlockBodies = bodies.ToArray();
-        station.outBlockClosedPositions = closedPositions.ToArray();
-        station.outflows = exits.ToArray();
+        body.isKinematic = true;
+        body.useGravity = false;
+        body.interpolation = RigidbodyInterpolation.Interpolate;
+        body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
     }
 
     private static MedalBallLotteryStation CreateStation(Transform field, string path, MedalJackpotKind kind)
@@ -291,14 +312,24 @@ public static class MedalLotteryStationBuilder
 
     private static void ConfigureLaunch(MedalBallLotteryStation station, Material accent, float centerZ)
     {
-        station.launchPoint = Group("LaunchPoint", station.rotor);
-        station.launchPoint.localPosition = new Vector3(2.06f, 1.24f, -.05f);
+        station.launchPoint = Group("LaunchPoint", station.isUpperStation ? station.transform : station.rotor);
+        station.launchPoint.localPosition = station.isUpperStation
+            ? new Vector3(0f, 1.24f, centerZ) : new Vector3(2.06f, 1.24f, -.05f);
+        if (station.isUpperStation) station.launchPositionJitter = Vector3.zero;
         station.launchVelocityRelativeToPoint = true;
         Box("RotatingBallSpout", station.launchPoint, new Vector3(0, .26f, 0), new Vector3(.62f, .13f, .55f), accent, false);
-        station.localLaunchVelocity = new Vector3(-.45f, 0f, 1.35f);
-        station.launchVelocityJitter = new Vector3(.15f, .05f, .50f);
+        station.localLaunchVelocity = station.usesBumpers ? new Vector3(-1.45f, 0f, .45f) : new Vector3(-.45f, 0f, 1.35f);
+        station.launchVelocityJitter = station.usesBumpers ? new Vector3(.20f, .05f, .25f) : new Vector3(.15f, .05f, .50f);
         station.guideLocalCenter = new Vector3(0, 0, centerZ);
-        station.guideAcceleration = .30f;
+        station.guideAcceleration = station.isUpperStation && station.usesBumpers ? .85f : .30f;
+        if (station.isUpperStation && station.usesBumpers)
+        {
+            station.upperMinimumHorizontalSpeed = 1.35f;
+            station.upperSpeedMaintenanceAcceleration = 1.7f;
+            station.upperStallSpeed = .22f;
+            station.upperStallDuration = 1.35f;
+            station.upperStallDisplacement = .12f;
+        }
     }
 
     private static void BuildFunnel(MedalBallLotteryStation station, string meshName, float outerRadius, float innerRadius, float outerY, float innerY, float centerZ, Material accent, Transform parentOverride = null, bool frontOpening = false)
@@ -388,11 +419,15 @@ public static class MedalLotteryStationBuilder
         body.useGravity = false;
         body.interpolation = RigidbodyInterpolation.Interpolate;
         body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
-        Cylinder("RotorHub", rotor, Vector3.zero, .20f, .12f, accent, false);
-        for (int side = 1; side >= (doubleArm ? -1 : 1); side -= 2)
+        if (!station.usesBumpers)
+            Cylinder("RotorHub", rotor, Vector3.zero, .20f, .12f, accent, false);
+        if (!station.usesBumpers)
         {
-            Box("RotatingPaddle", rotor, new Vector3(side * 1.38f, .12f, 0), new Vector3(1.12f, .15f, .14f), gold, true);
-            Box("OpenArm", rotor, new Vector3(side * .42f, .20f, 0), new Vector3(.84f, .09f, .10f), accent, false);
+            for (int side = 1; side >= (doubleArm ? -1 : 1); side -= 2)
+            {
+                Box("RotatingPaddle", rotor, new Vector3(side * 1.38f, .12f, 0), new Vector3(1.12f, .15f, .14f), gold, true);
+                Box("OpenArm", rotor, new Vector3(side * .42f, .20f, 0), new Vector3(.84f, .09f, .10f), accent, false);
+            }
         }
         station.rotor = rotor;
         station.rotorBody = body;
@@ -449,6 +484,83 @@ public static class MedalLotteryStationBuilder
         return prefab;
     }
 
+    private static Mesh SectorMesh(string name, float innerRadius, float outerRadius, float startDegrees, float endDegrees)
+    {
+        const int steps = 16;
+        var vertices = new List<Vector3>((steps + 1) * 2);
+        var triangles = new List<int>(steps * 6);
+        for (int i = 0; i <= steps; i++)
+        {
+            float angle = Mathf.Lerp(startDegrees, endDegrees, i / (float)steps) * Mathf.Deg2Rad;
+            Vector3 direction = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+            vertices.Add(direction * outerRadius);
+            vertices.Add(direction * innerRadius);
+            if (i == steps) continue;
+            int next = (i + 1) * 2;
+            triangles.Add(i * 2); triangles.Add(i * 2 + 1); triangles.Add(next);
+            triangles.Add(next); triangles.Add(i * 2 + 1); triangles.Add(next + 1);
+        }
+        return SaveDecorativeMesh(name, vertices, triangles);
+    }
+
+    private static Mesh CrystalCapMesh()
+    {
+        const int sides = 12;
+        var radii = new[] { .30f, .32f, .27f, .155f, 0f };
+        var heights = new[] { -.10f, 0f, .16f, .28f, .32f };
+        var vertices = new List<Vector3>();
+        var triangles = new List<int>();
+        for (int ring = 0; ring < radii.Length - 1; ring++)
+        for (int side = 0; side < sides; side++)
+        {
+            float angle = side * Mathf.PI * 2f / sides;
+            float nextAngle = (side + 1) * Mathf.PI * 2f / sides;
+            Vector3 lower = new Vector3(Mathf.Cos(angle) * radii[ring], heights[ring], Mathf.Sin(angle) * radii[ring]);
+            Vector3 nextLower = new Vector3(Mathf.Cos(nextAngle) * radii[ring], heights[ring], Mathf.Sin(nextAngle) * radii[ring]);
+            Vector3 upper = new Vector3(Mathf.Cos(angle) * radii[ring + 1], heights[ring + 1], Mathf.Sin(angle) * radii[ring + 1]);
+            Vector3 nextUpper = new Vector3(Mathf.Cos(nextAngle) * radii[ring + 1], heights[ring + 1], Mathf.Sin(nextAngle) * radii[ring + 1]);
+            if (radii[ring + 1] > 0f) AddFacet(vertices, triangles, lower, upper, nextUpper);
+            AddFacet(vertices, triangles, lower, nextUpper, nextLower);
+        }
+        return SaveDecorativeMesh("DrawUpperCrystalCap", vertices, triangles);
+    }
+
+    private static void AddFacet(List<Vector3> vertices, List<int> triangles, Vector3 a, Vector3 b, Vector3 c)
+    {
+        int start = vertices.Count;
+        vertices.Add(a); vertices.Add(b); vertices.Add(c);
+        triangles.Add(start); triangles.Add(start + 1); triangles.Add(start + 2);
+    }
+
+    private static Mesh SaveDecorativeMesh(string name, List<Vector3> vertices, List<int> triangles)
+    {
+        string path = Root + "/Meshes/" + name + ".asset";
+        var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+        bool create = mesh == null;
+        if (create) mesh = new Mesh { name = name };
+        else mesh.Clear();
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(triangles, 0);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        if (create) AssetDatabase.CreateAsset(mesh, path);
+        else EditorUtility.SetDirty(mesh);
+        return mesh;
+    }
+
+    private static Transform MeshDecoration(string name, Transform parent, Vector3 position, Mesh mesh, Material material)
+    {
+        var go = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = position;
+        go.GetComponent<MeshFilter>().sharedMesh = mesh;
+        var renderer = go.GetComponent<MeshRenderer>();
+        renderer.sharedMaterial = material;
+        renderer.receiveShadows = false;
+        renderer.shadowCastingMode = ShadowCastingMode.Off;
+        return go.transform;
+    }
+
     private static Transform Group(string name, Transform parent)
     {
         var go = new GameObject(name);
@@ -480,7 +592,7 @@ public static class MedalLotteryStationBuilder
         return go.transform;
     }
 
-    private static void Label(string name, Transform parent, string content, Vector3 position, Vector2 size, float fontSize, Color color, Quaternion? rotation = null)
+    private static TMP_Text Label(string name, Transform parent, string content, Vector3 position, Vector2 size, float fontSize, Color color, Quaternion? rotation = null)
     {
         var go = new GameObject(name, typeof(TextMeshPro));
         go.transform.SetParent(parent, false);
@@ -492,6 +604,7 @@ public static class MedalLotteryStationBuilder
         text.textWrappingMode = TextWrappingModes.NoWrap;
         text.rectTransform.sizeDelta = size;
         text.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+        return text;
     }
 
     private static Material MakeMaterial(string name, Color color, float metallic, float emission = 0f)
@@ -511,6 +624,34 @@ public static class MedalLotteryStationBuilder
             material.EnableKeyword("_EMISSION");
             material.SetColor("_EmissionColor", color * emission);
         }
+        EditorUtility.SetDirty(material);
+        return material;
+    }
+
+    private static Material MakeTransparentMaterial(string name, Color color, float smoothness)
+    {
+        var material = MakeMaterial(name, color, 0f);
+        material.SetFloat("_Surface", 1f);
+        material.SetFloat("_Blend", 0f);
+        material.SetFloat("_BlendModePreserveSpecular", 0f);
+        material.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+        material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+        material.SetFloat("_SrcBlendAlpha", (float)BlendMode.One);
+        material.SetFloat("_DstBlendAlpha", (float)BlendMode.OneMinusSrcAlpha);
+        material.SetFloat("_ZWrite", 0f);
+        material.SetFloat("_AlphaClip", 0f);
+        material.SetFloat("_AlphaToMask", 0f);
+        material.SetFloat("_Cull", (float)CullMode.Off);
+        material.SetFloat("_ReceiveShadows", 0f);
+        material.SetFloat("_Smoothness", smoothness);
+        material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.EnableKeyword("_RECEIVE_SHADOWS_OFF");
+        material.DisableKeyword("_ALPHATEST_ON");
+        material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        material.DisableKeyword("_ALPHAMODULATE_ON");
+        material.SetOverrideTag("RenderType", "Transparent");
+        material.SetShaderPassEnabled("ShadowCaster", false);
+        material.renderQueue = (int)RenderQueue.Transparent;
         EditorUtility.SetDirty(material);
         return material;
     }

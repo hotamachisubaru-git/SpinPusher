@@ -3,7 +3,6 @@ using System.IO;
 using System.Linq;
 using TMPro;
 using UnityEditor;
-using UnityEditor.Events;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -26,7 +25,64 @@ public static class MedalPusherExpansionBuilder
         EditorSceneManager.SaveScene(scene);
         AssetDatabase.SaveAssets();
         Validate();
-        Debug.Log("[MedalPusher] Slots, inlets and three physical jackpot stations saved.");
+        Debug.Log("[MedalPusher] Slots, ball-only board and three physical jackpot stations saved.");
+    }
+
+    [MenuItem("Tools/Medal Pusher/Apply Click Placement And Ball Only")]
+    public static void ApplyClickPlacementAndBallOnly()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode) throw new InvalidOperationException("Stop Play mode first.");
+        var scene = SceneManager.GetActiveScene();
+        if (scene.path != MedalPusherSceneBuilder.ScenePath) throw new InvalidOperationException("Open the medal pusher game scene.");
+        var game = UnityEngine.Object.FindFirstObjectByType<MedalPusherGame>();
+        if (game == null) throw new InvalidOperationException("Medal pusher game missing.");
+        ApplyClickPlacementAndBallOnlyToScene(scene, game);
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        AssetDatabase.SaveAssets();
+        Validate();
+        Debug.Log("[MedalPusher] Click-placement HUD and ball-only board saved without rebuilding lottery geometry.");
+    }
+
+    [MenuItem("Tools/Medal Pusher/Apply Slot And Upper Recovery")]
+    public static void ApplySlotAndUpperRecovery() => ApplyClickPlacementAndBallOnly();
+
+    public static void ApplyClickPlacementAndBallOnlyToScene(Scene scene, MedalPusherGame game)
+    {
+        var controller = game != null ? game.GetComponent<MedalSlotJackpotController>() : null;
+        if (controller == null || game.gameObject.scene != scene) throw new InvalidOperationException("Controller/game scene connection missing.");
+        ApplyBallOnlyContent(game);
+        BuildUI(game, controller);
+        MedalArcadeSettingsBuilder.Build(UnityEngine.Object.FindFirstObjectByType<MedalPusherUI>(), game, controller);
+        if (controller.upperStation != null)
+        {
+            controller.upperStation.guideAcceleration = .85f;
+            controller.upperStation.upperMinimumHorizontalSpeed = 1.35f;
+            controller.upperStation.upperSpeedMaintenanceAcceleration = 1.7f;
+            controller.upperStation.upperStallSpeed = .22f;
+            controller.upperStation.upperStallDuration = 1.35f;
+            controller.upperStation.upperStallDisplacement = .12f;
+            var title = controller.upperStation.transform.Find("DrawTitle");
+            if (title != null) controller.upperStation.upperWinText = title.GetComponent<TMP_Text>();
+            if (controller.upperStation.upperWinText != null) controller.upperStation.upperWinText.text = "00WIN（枚獲得）";
+        }
+        var view = UnityEngine.Object.FindFirstObjectByType<MedalPusherCameraView>();
+        if (view != null) { view.overview = false; view.ReleaseStation(); view.ApplyView(); }
+    }
+
+    private static void ApplyBallOnlyContent(MedalPusherGame game)
+    {
+        game.prizePrefabs = Array.Empty<GameObject>();
+        var manager = game.GetComponent<PrizeDropManager>() ?? game.gameObject.AddComponent<PrizeDropManager>();
+        manager.spawnGenericPrizes = false;
+        manager.minPrizesOnBoard = 0;
+        manager.maxPrizesOnBoard = 0;
+        manager.prizeTypes = Array.Empty<PrizeDropManager.PrizeType>();
+        if (game.itemsRoot != null)
+            foreach (var item in game.itemsRoot.GetComponentsInChildren<MedalItem>(true))
+                if (item.isPrize && !item.isBall) UnityEngine.Object.DestroyImmediate(item.gameObject);
+        EditorUtility.SetDirty(game);
+        EditorUtility.SetDirty(manager);
     }
 
     public static void ApplyToScene(Scene scene, MedalPusherGame game)
@@ -47,35 +103,11 @@ public static class MedalPusherExpansionBuilder
         MedalPayoutBuilder.Build(field, game);
         var settings = game.GetComponent<MedalArcadeSettings>() ?? game.gameObject.AddComponent<MedalArcadeSettings>();
         game.maxPrizesOnBoard = 12;
-        var manager = game.GetComponent<PrizeDropManager>();
-        manager.maxPrizesOnBoard = 12;
-        manager.minPrizesOnBoard = 6;
+        ApplyBallOnlyContent(game);
 
-        var inlets = field.Find("MedalInlets");
-        if (inlets != null) UnityEngine.Object.DestroyImmediate(inlets.gameObject);
-        inlets = Child("MedalInlets", field);
-        var gold = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Materials/MedalGold.mat");
-        var dark = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Materials/Board.mat");
-        var light = AssetDatabase.LoadAssetAtPath<Material>(Root + "/Materials/NeonCyan.mat");
-        var lights = new Renderer[3];
-        game.medalInlets = new Transform[3];
-        string[] names = { "LEFT", "CENTER", "RIGHT" };
-        for (int i = 0; i < 3; i++)
-        {
-            var inlet = Child("Inlet_" + names[i], inlets);
-            inlet.localPosition = new Vector3((i - 1) * 3.2f, 0, .6f);
-            Shape("GoldHopper", inlet, new Vector3(0, 2.52f, 0), new Vector3(.85f, .45f, .45f), gold);
-            Shape("BlackSlot", inlet, new Vector3(0, 2.51f, -.24f), new Vector3(.63f, .12f, .025f), dark);
-            Shape("Support_Left", inlet, new Vector3(-.35f, 1.75f, .15f), new Vector3(.09f, 1.1f, .09f), gold);
-            Shape("Support_Right", inlet, new Vector3(.35f, 1.75f, .15f), new Vector3(.09f, 1.1f, .09f), gold);
-            lights[i] = Shape("SelectionLight", inlet, new Vector3(0, 2.8f, 0), new Vector3(.7f, .07f, .4f), light).GetComponent<Renderer>();
-            game.medalInlets[i] = Child("MedalOutlet", inlet);
-            game.medalInlets[i].localPosition = new Vector3(0, 2.25f, -.18f);
-        }
-        game.selectedInlet = 1;
-        game.medalSpawnPoint = game.medalInlets[1];
+        MedalSlotPocketLayout.Build(game, controller);
         LocalizeCabinet(field);
-        // Preserve regular prizes and medals; replace only this expansion's initial balls.
+        // Keep medals; only lottery balls are populated as board prizes.
         foreach (var item in game.itemsRoot.GetComponentsInChildren<MedalItem>())
             if (item.isBall) UnityEngine.Object.DestroyImmediate(item.gameObject);
         for (int i = 0; i < 3; i++)
@@ -85,7 +117,7 @@ public static class MedalPusherExpansionBuilder
             ball.transform.SetParent(game.itemsRoot, false);
             ball.transform.localPosition = new Vector3((i - 1) * 2.4f, .7f, -3.25f);
         }
-        BuildUI(game, controller, lights);
+        BuildUI(game, controller);
         settings.ApplyToGame(true);
         MedalArcadeSettingsBuilder.Build(UnityEngine.Object.FindFirstObjectByType<MedalPusherUI>(), game, controller);
         EditorUtility.SetDirty(game);
@@ -120,7 +152,7 @@ public static class MedalPusherExpansionBuilder
         return result;
     }
 
-    private static void BuildUI(MedalPusherGame game, MedalSlotJackpotController controller, Renderer[] lights)
+    private static void BuildUI(MedalPusherGame game, MedalSlotJackpotController controller)
     {
         var baseUI = UnityEngine.Object.FindFirstObjectByType<MedalPusherUI>();
         if (baseUI == null) throw new InvalidOperationException("Game UI missing.");
@@ -133,10 +165,25 @@ public static class MedalPusherExpansionBuilder
         var rect = rootGo.GetComponent<RectTransform>();
         SetRect(rect, Vector2.zero, Vector2.one);
         var ui = root.gameObject.AddComponent<MedalArcadeUI>();
-        ui.game = game; ui.controller = controller; ui.inletLights = lights;
+        ui.game = game; ui.controller = controller;
+        ui.inletButtons = Array.Empty<Image>();
+        ui.inletLights = Array.Empty<Renderer>();
         ui.cameraView = UnityEngine.Object.FindFirstObjectByType<MedalPusherCameraView>();
+        ui.worldReelsText = game.GetComponentsInChildren<TMP_Text>(true).FirstOrDefault(t => t.name == "CabinetTitle");
+        if (ui.worldReelsText != null)
+        {
+            ui.worldReelsText.text = "− | − | −";
+            ui.worldReelsText.color = Color.white;
+            ui.worldReelsText.font = MedalJapaneseFontBuilder.GetFont();
+            ui.worldReelsText.fontStyle = FontStyles.Bold;
+            ui.worldReelsText.enableAutoSizing = true;
+            ui.worldReelsText.fontSizeMin = 2.5f; ui.worldReelsText.fontSizeMax = 5.5f;
+            ui.worldReelsText.textWrappingMode = TextWrappingModes.NoWrap;
+        }
         ui.towerJackpotValues = new TMP_Text[4];
         ui.towerJackpotKinds = new[] { -1, 0, 2, 1 };
+        int[] displayedPools = controller.jackpotPools != null && controller.jackpotPools.Length == 3
+            ? controller.jackpotPools : new[] { 150, 250, 500 };
         var tower = game.transform.Find("GeneratedPlayfield/TreasureCabinetDecor/FourSidedTreasureTower");
         for (int i = 0; i < 4 && tower != null; i++)
         {
@@ -150,19 +197,24 @@ public static class MedalPusherExpansionBuilder
             {
                 text.rectTransform.localPosition = new Vector3(0, 6.15f, -3.09f);
                 text.rectTransform.sizeDelta = new Vector2(5.2f, 1.65f);
-                text.text = "<color=#FF5E6E>赤 150枚</color>\n<color=#54BBFF>青 250枚</color>\n<color=#FFD448>黄 500枚</color>";
+                text.text = "<color=#FF5E6E>赤 " + displayedPools[0] + "枚</color>\n<color=#54BBFF>青 "
+                    + displayedPools[1] + "枚</color>\n<color=#FFD448>黄 " + displayedPools[2] + "枚</color>";
                 var caption = face.Find("ScreenCaption"); if (caption != null) caption.GetComponent<TMP_Text>().text = "";
                 var divider = face.Find("ColorDivider"); if (divider != null) divider.localPosition = new Vector3(0, 6.99f, -3.074f);
             }
-            else text.text = controller.jackpotPools[ui.towerJackpotKinds[i]] + "枚";
+            else text.text = displayedPools[ui.towerJackpotKinds[i]] + "枚";
         }
-        Panel("SlotPanel", root, new Vector2(.025f, .64f), new Vector2(.29f, .845f));
-        Text("SlotTitle", root, "宝探しスロット", new Vector2(.04f, .80f), new Vector2(.275f, .834f), 22, new Color(1, .8f, .25f));
-        ui.reelsText = Text("SlotReels", root, "7  |  7  |  7", new Vector2(.04f, .713f), new Vector2(.275f, .795f), 34, Color.white);
+        ui.reelsText = Text("SlotReels", root, "−  |  −  |  −", new Vector2(.04f, .916f), new Vector2(.36f, .978f), 44, Color.white);
         ui.reelsText.alignment = TextAlignmentOptions.Center;
-        ui.spinMeterText = Text("SpinMeter", root, "", new Vector2(.04f, .655f), new Vector2(.28f, .71f), 18, Color.white);
-        Panel("UpperWinPanel", root, new Vector2(.025f, .53f), new Vector2(.29f, .62f));
-        ui.upperWinText = Text("UpperWinText", root, "上段 0 WIN ｜ 100 WIN超で3色抽選", new Vector2(.04f, .541f), new Vector2(.278f, .609f), 18, Color.white);
+        ui.reelsText.fontStyle = FontStyles.Bold;
+        ui.reelsText.enableAutoSizing = true; ui.reelsText.fontSizeMin = 24; ui.reelsText.fontSizeMax = 44;
+        ui.reelsText.textWrappingMode = TextWrappingModes.NoWrap;
+        ui.spinMeterText = Text("SpinMeter", root, "", new Vector2(.04f, .887f), new Vector2(.36f, .918f), 18, Color.white);
+        ui.spinMeterText.alignment = TextAlignmentOptions.Center;
+        Panel("UpperWinPanel", root, new Vector2(.025f, .75f), new Vector2(.29f, .845f));
+        ui.upperWinText = Text("UpperWinText", root, "00WIN（枚獲得）\n100WIN超で3色開放", new Vector2(.04f, .758f), new Vector2(.278f, .837f), 20, Color.white);
+        ui.payoutRemainingText = Text("PayoutRemaining", root, "PAYOUT  00枚", new Vector2(.04f, .155f), new Vector2(.24f, .192f), 24, new Color(1, .85f, .3f));
+        ui.payoutRemainingText.enableAutoSizing = true; ui.payoutRemainingText.fontSizeMin = 16; ui.payoutRemainingText.fontSizeMax = 24;
         Panel("JPPanel", root, new Vector2(.77f, .025f), new Vector2(.975f, .225f));
         ui.jackpotTexts = new TMP_Text[3];
         for (int i = 0; i < 3; i++)
@@ -173,25 +225,17 @@ public static class MedalPusherExpansionBuilder
             ui.jackpotTexts[i].fontSizeMax = 25;
             ui.jackpotTexts[i].textWrappingMode = TextWrappingModes.NoWrap;
         }
-        Panel("DrawStatus", root, new Vector2(.305f, .785f), new Vector2(.975f, .845f));
+        ui.lotteryStatusPanel = Panel("DrawStatus", root, new Vector2(.305f, .785f), new Vector2(.975f, .845f)).gameObject;
         ui.statusText = Text("DrawStatusText", root, "", new Vector2(.315f, .793f), new Vector2(.962f, .837f), 22, Color.white);
         ui.statusText.alignment = TextAlignmentOptions.Center;
         ui.statusText.enableAutoSizing = true;
         ui.statusText.fontSizeMin = 12;
         ui.statusText.fontSizeMax = 22;
         ui.statusText.textWrappingMode = TextWrappingModes.NoWrap;
-        ui.inletButtons = new Image[3];
-        UnityEngine.Events.UnityAction[] actions = { game.SelectLeftInlet, game.SelectCenterInlet, game.SelectRightInlet };
-        string[] labels = { "1：左", "2：中央", "3：右" };
-        for (int i = 0; i < 3; i++)
-        {
-            var panel = Panel("InletButton_" + i, root, new Vector2(.365f + i * .135f, .135f), new Vector2(.49f + i * .135f, .192f));
-            var image = panel.GetComponent<Image>(); image.raycastTarget = true; ui.inletButtons[i] = image;
-            var button = panel.gameObject.AddComponent<Button>(); button.targetGraphic = image;
-            UnityEventTools.AddPersistentListener(button.onClick, actions[i]);
-            var text = Text("Label", panel, labels[i], Vector2.zero, Vector2.one, 21, Color.white);
-            text.alignment = TextAlignmentOptions.Center;
-        }
+        var visibilitySettings = game.GetComponent<MedalArcadeSettings>();
+        bool showStatus = visibilitySettings != null && visibilitySettings.showLotteryStatus;
+        ui.lotteryStatusPanel.SetActive(showStatus);
+        ui.statusText.gameObject.SetActive(showStatus);
         ui.stationMeters = new TMP_Text[3];
         for (int i = 0; i < controller.stations.Length; i++)
         {
@@ -215,22 +259,23 @@ public static class MedalPusherExpansionBuilder
             ui.confetti[i] = piece;
         }
         var controls = baseUI.transform.Find("Controls");
-        if (controls != null) controls.GetComponent<TMP_Text>().text = "スペース／クリック：投入　1～3：投入口　V：全景";
+        if (controls != null) controls.GetComponent<TMP_Text>().text = "盤面をクリック・長押しで投入　V：全景";
     }
 
     private static void ConfigureBaseHUD(MedalPusherUI ui)
     {
-        foreach (string name in new[] { "ScoreLabel", "ScoreValue", "ControlsPanel" })
+        foreach (string name in new[] { "ScoreLabel", "ScoreValue", "ControlsPanel", "Title", "ComboPanel" })
         {
             var old = ui.transform.Find(name);
             if (old != null) UnityEngine.Object.DestroyImmediate(old.gameObject);
         }
         ui.scoreLabel = null; ui.scoreText = null;
+        ui.comboPanel = null; ui.comboText = null; ui.comboLabel = null;
         PoseUI(ui.transform, "Header", new Vector2(.025f, .885f), new Vector2(.975f, .98f));
-        PoseUI(ui.transform, "Title", new Vector2(.04f, .902f), new Vector2(.36f, .967f), "宝探しメダルゲーム");
         PoseUI(ui.transform, "Controls", new Vector2(.385f, .9f), new Vector2(.96f, .968f));
         var panel = ui.transform.Find("MedalsPanel");
-        if (panel == null) panel = Panel("MedalsPanel", ui.transform, new Vector2(.025f, .025f), new Vector2(.245f, .14f));
+        if (panel == null) panel = Panel("MedalsPanel", ui.transform, new Vector2(.025f, .025f), new Vector2(.245f, .205f));
+        PoseUI(ui.transform, "MedalsPanel", new Vector2(.025f, .025f), new Vector2(.245f, .205f));
         panel.SetAsFirstSibling();
         PoseUI(ui.transform, "MedalLabel", new Vector2(.04f, .095f), new Vector2(.23f, .135f), "メダル残高");
         PoseUI(ui.transform, "MedalValue", new Vector2(.04f, .032f), new Vector2(.23f, .097f));
@@ -239,7 +284,6 @@ public static class MedalPusherExpansionBuilder
         PoseUI(ui.transform, "ViewButton/ViewLabel", Vector2.zero, Vector2.one, "全景");
         PoseUI(ui.transform, "DropMedalButton", new Vector2(.515f, .035f), new Vector2(.745f, .105f));
         PoseUI(ui.transform, "DropMedalButton/DropLabel", Vector2.zero, Vector2.one, "メダル投入");
-        PoseUI(ui.transform, "ComboPanel", new Vector2(.34f, .665f), new Vector2(.66f, .725f));
         PoseUI(ui.transform, "JackpotPanel/JackpotText", Vector2.zero, Vector2.one, "JACKPOT");
         foreach (var text in ui.GetComponentsInChildren<TMP_Text>(true))
         {
@@ -261,7 +305,7 @@ public static class MedalPusherExpansionBuilder
             text.font = MedalJapaneseFontBuilder.GetFont();
             switch (text.name)
             {
-                case "CabinetTitle": text.text = "宝探し\nメダルゲーム"; break;
+                case "CabinetTitle": text.text = "− | − | −"; break;
                 case "TreasureTitle": text.text = "宝探し"; break;
                 case "JackpotTitle": text.text = "150枚"; break;
                 case "ScreenCaption": text.text = "赤 ／ 青 ／ 黄"; break;
@@ -283,19 +327,29 @@ public static class MedalPusherExpansionBuilder
         var game = UnityEngine.Object.FindFirstObjectByType<MedalPusherGame>();
         var controller = UnityEngine.Object.FindFirstObjectByType<MedalSlotJackpotController>();
         if (game == null || controller == null || controller.game != game) throw new InvalidOperationException("Controller/game connection missing.");
+        if (game.prizePrefabs == null || game.prizePrefabs.Length != 0 || game.itemsRoot == null || game.itemsRoot.GetComponentsInChildren<MedalItem>(true).Any(i => i.isPrize && !i.isBall)) throw new InvalidOperationException("Board prizes must consist only of lottery balls.");
+        var manager = game.GetComponent<PrizeDropManager>();
+        if (manager == null || manager.spawnGenericPrizes || manager.minPrizesOnBoard != 0 || manager.maxPrizesOnBoard != 0 || manager.prizeTypes == null || manager.prizeTypes.Length != 0) throw new InvalidOperationException("Generic prize spawning must stay disabled.");
+        var arcadeUI = UnityEngine.Object.FindFirstObjectByType<MedalArcadeUI>();
+        if (arcadeUI == null || arcadeUI.GetComponentsInChildren<Transform>(true).Any(t => t.name.StartsWith("InletButton_")) || (arcadeUI.inletButtons != null && arcadeUI.inletButtons.Length != 0)) throw new InvalidOperationException("Left/center/right selection controls must be removed.");
         if (game.medalInlets == null || game.medalInlets.Length != 3 || game.medalInlets.Any(t => t == null)) throw new InvalidOperationException("Three inlets required.");
         if (controller.ballPrefabs == null || controller.ballPrefabs.Length != 3 || controller.ballPrefabs.Any(p => p == null || !p.GetComponent<MedalItem>().isBall)) throw new InvalidOperationException("Three board balls required.");
         if (controller.stations == null || controller.stations.Length != 3 || controller.stations.Select(s => s.kind).Distinct().Count() != 3) throw new InvalidOperationException("Three different jackpot stations required.");
-        if (controller.upperStation == null || !controller.upperStation.isUpperStation || controller.upperStation.GetComponentsInChildren<MedalLotteryPocket>().Any(p => p.jackpot)) throw new InvalidOperationException("Upper WIN lottery required.");
+        if (controller.upperStation == null || !controller.upperStation.isUpperStation || !controller.upperStation.usesBumpers) throw new InvalidOperationException("Upper physical bumper lottery required.");
         var upper = controller.upperStation;
+        if (upper.bumpers == null || upper.bumpers.Length != 4 || upper.bumpers.Any(b => b == null || b.station != upper || b.GetComponent<Collider>() == null || b.GetComponent<Collider>().isTrigger)) throw new InvalidOperationException("Four solid round bumpers required.");
+        if (upper.upperOutflow == null || upper.upperOutflow.station != upper || upper.GetComponentsInChildren<MedalLotteryPocket>().Length != 0) throw new InvalidOperationException("Upper draw must finish through actual outflow rather than WIN pockets.");
+        var upperFloor = upper.transform.Find("UpperBumperPlayFloor");
+        var clearRimGuards = upper.GetComponentsInChildren<Transform>(true).Where(t => t.name == "UpperClearRimGuard").ToArray();
+        if (upperFloor == null || upperFloor.GetComponent<MeshCollider>() == null || upper.transform.Find("SlopedPhysicalBowl") != null || clearRimGuards.Length != 16 || upper.transform.Find("ColorSelectionStage") != null) throw new InvalidOperationException("Integrated flat upper disk, clear perimeter and no separate selector required.");
         if (upper.colorRoutePockets == null || upper.colorRoutePockets.Length != 3 || upper.colorGateBodies == null || upper.colorGateBodies.Length != 3 || upper.colorRoutePockets.Any(p => p == null) || upper.colorGateBodies.Any(g => g == null)) throw new InvalidOperationException("Three sealed color pockets required.");
         Vector3 red = game.transform.InverseTransformPoint(upper.colorRoutePockets.Single(p => p.kind == MedalJackpotKind.Ruby).transform.position);
         Vector3 blue = game.transform.InverseTransformPoint(upper.colorRoutePockets.Single(p => p.kind == MedalJackpotKind.Sapphire).transform.position);
         Vector3 yellow = game.transform.InverseTransformPoint(upper.colorRoutePockets.Single(p => p.kind == MedalJackpotKind.Amber).transform.position);
         if (red.x >= blue.x || yellow.z <= red.z || yellow.z <= blue.z) throw new InvalidOperationException("Expected red left, blue right, yellow rear from the pusher.");
-        if (upper.outBlock == null || upper.outflow == null || upper.outBlockBody == null || upper.outBlockRaiseHeight >= 0) throw new InvalidOperationException("One-use retracting white OUT block required.");
-        if (upper.outBlocks == null || upper.outBlocks.Length != 8 || upper.outBlockBodies == null || upper.outBlockBodies.Length != 8 || upper.outflows == null || upper.outflows.Length != 8 || upper.outBlocks.Any(g => g == null) || upper.outflows.Any(g => g == null)) throw new InvalidOperationException("Eight linked perimeter/front guards and real exterior exits required.");
-        if (upper.GetComponentsInChildren<TMP_Text>(true).Any(t => t.name == "GateColorMark" || t.name == "ColorRouteLabel")) throw new InvalidOperationException("Color pockets should be identified by their colors.");
+        if (upper.outBlockRaiseHeight >= 0 || upper.outBlocks == null || upper.outBlocks.Length != 4 || upper.outBlockBodies == null || upper.outBlockBodies.Length != 4 || upper.outBlockClosedPositions == null || upper.outBlockClosedPositions.Length != 4 || upper.outBlocks.Any(g => g == null) || upper.outBlockBodies.Any(g => g == null)) throw new InvalidOperationException("Four independently retracting front OUT blocks required.");
+        if (upper.outflows == null || upper.outflows.Length != 1 || upper.outflows[0] == null || upper.upperOutflow != upper.outflows[0]) throw new InvalidOperationException("One real front OUT exit required.");
+        if (upper.GetComponentsInChildren<TMP_Text>(true).Any(t => t.name == "GateColorMark" || t.name == "ColorRouteLabel" || t.name == "OutBlockMark")) throw new InvalidOperationException("Color pockets and guards should be identified by their appearance.");
         if (game.sidePayoutPoints == null || game.sidePayoutPoints.Length != 2 || game.jackpotPayoutPoint == null) throw new InvalidOperationException("Payout outlets missing.");
         if (game.sidePayoutPoints.Any(p => game.transform.InverseTransformPoint(p.position).z < 1f || game.transform.InverseTransformPoint(p.position).y < 1.7f)) throw new InvalidOperationException("Side hoppers must pay onto the upper pusher plate.");
         if (game.GetComponent<MedalArcadeSettings>() == null || UnityEngine.Object.FindFirstObjectByType<MedalArcadeSettingsUI>() == null) throw new InvalidOperationException("Settings missing.");
@@ -307,8 +361,8 @@ public static class MedalPusherExpansionBuilder
         for (int i = 0; i < 3; i++)
             if (controller.stations[i].kind != (MedalJackpotKind)i) throw new InvalidOperationException("Station kind/order mismatch.");
         if (UnityEngine.Object.FindFirstObjectByType<MedalArcadeUI>() == null) throw new InvalidOperationException("Arcade UI missing.");
-        var report = new { success = true, inlets = game.medalInlets.Length, boardBallTypes = controller.ballPrefabs.Length,
-            upper = new { winPockets = upper.GetComponentsInChildren<MedalLotteryPocket>().Length, colorPockets = upper.colorRoutePockets.Length, whiteOutBlock = true, linkedGuards = upper.outBlocks.Length, exteriorExits = upper.outflows.Length, withdrawDirection = "down" },
+        var report = new { success = true, inlets = game.medalInlets.Length, boardBallTypes = controller.ballPrefabs.Length, genericPrizePrefabs = game.prizePrefabs.Length, genericBoardPrizes = 0, genericPrizeSpawning = manager.spawnGenericPrizes, inletSelectionButtons = 0,
+            upper = new { bumpers = upper.bumpers.Length, winPerHit = 2, colorDrawOnActualPocketEntry = true, resumeSameUpperBallAfterColorDraw = true, openColorGatesAboveWin = 100, flatReferenceDisk = true, clearRimGuards = clearRimGuards.Length, rearPocketIsYellow = true, upperExitOpenings = 1, separateFrontSelector = false, winPockets = upper.GetComponentsInChildren<MedalLotteryPocket>().Length, colorPockets = upper.colorRoutePockets.Length, independentOutBlocks = upper.outBlocks.Length, usesPerOutBlock = 1, exteriorExits = upper.outflows.Length, withdrawDirection = "down" },
             sidePayoutPositions = game.sidePayoutPoints.Select(p => { Vector3 v = game.transform.InverseTransformPoint(p.position); return new { x = v.x, y = v.y, z = v.z }; }).ToArray(),
             stations = controller.stations.Select(s => new { kind = s.kind.ToString(), pockets = s.GetComponentsInChildren<MedalLotteryPocket>().Length, liveJackpotAmount = s.jackpotPocketText != null, randomCentralPartitions = s.dividerBody != null }).ToArray() };
         WriteReport("expansion-scene-validation.json", report);

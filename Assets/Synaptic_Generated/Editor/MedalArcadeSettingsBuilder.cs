@@ -22,6 +22,8 @@ public static class MedalArcadeSettingsBuilder
         if (old != null) UnityEngine.Object.DestroyImmediate(old.gameObject);
         var root = Rect("ArcadeSettings", baseUI.transform, Vector2.zero, Vector2.one);
         var ui = root.gameObject.AddComponent<MedalArcadeSettingsUI>(); ui.settings = settings;
+        ui.arcadeUI = baseUI.GetComponentInChildren<MedalArcadeUI>(true);
+        if (ui.arcadeUI != null) ui.arcadeUI.settings = settings;
         var open = Button("SettingsButton", root, new Vector2(.25f, .035f), new Vector2(.345f, .105f), "設定", new Color(.13f, .3f, .43f));
         UnityEventTools.AddPersistentListener(open.onClick, ui.Open);
         var modal = Panel("SettingsModal", root, Vector2.zero, Vector2.one, new Color(0, 0, .02f, .8f));
@@ -37,14 +39,16 @@ public static class MedalArcadeSettingsBuilder
             ui.jackpotInputs[i] = Field("Jackpot_" + i, content, new Vector2(x, .773f), new Vector2(x + .29f, .897f), names[i], colors[i]);
         }
         ui.targetPayoutInput = Field("TargetPayout", content, new Vector2(.04f, .624f), new Vector2(.48f, .75f), "目標払出率（P/O %）");
-        ui.medalsPerSpinInput = Field("MedalsPerSpin", content, new Vector2(.52f, .624f), new Vector2(.96f, .75f), "スロット1回の投入枚数");
+        ui.medalsPerSpinInput = Field("MedalsPerSpin", content, new Vector2(.52f, .624f), new Vector2(.96f, .75f), "入賞1枚で1回転（固定）");
         ui.slotBallChanceInput = Field("SlotBallChance", content, new Vector2(.04f, .475f), new Vector2(.48f, .601f), "ボール当選率の基準（%）");
         ui.slotMedalChanceInput = Field("SlotMedalChance", content, new Vector2(.52f, .475f), new Vector2(.96f, .601f), "メダル当選率の基準（%）");
         ui.slotSpinDurationInput = Field("SpinDuration", content, new Vector2(.04f, .326f), new Vector2(.32f, .452f), "スロット時間（秒）");
         ui.rescueSpinsInput = Field("RescueSpins", content, new Vector2(.36f, .326f), new Vector2(.64f, .452f), "ボール救済基準（0で無効）");
         ui.sideHoleWidthInput = Field("SideHoleWidth", content, new Vector2(.68f, .326f), new Vector2(.96f, .452f), "横穴幅（0で閉じる）");
-        ui.measuredPayoutText = Label("MeasuredPayout", content, new Vector2(.04f, .242f), new Vector2(.96f, .307f), "実績払出率（P/O） 未計測", 18, new Color(.6f, .9f, 1));
-        var explanation = Label("Explanation", content, new Vector2(.04f, .142f), new Vector2(.96f, .238f),
+        ui.showLotteryStatusToggle = LotteryStatusToggle(content, settings.showLotteryStatus);
+        UnityEventTools.AddPersistentListener(ui.showLotteryStatusToggle.onValueChanged, ui.SetLotteryStatusVisibility);
+        ui.measuredPayoutText = Label("MeasuredPayout", content, new Vector2(.04f, .209f), new Vector2(.96f, .263f), "実績払出率（P/O） 未計測", 18, new Color(.6f, .9f, 1));
+        var explanation = Label("Explanation", content, new Vector2(.04f, .142f), new Vector2(.96f, .205f),
             "目標払出率に応じてスロット当選率とボール救済の間隔を調整します。ボールの物理抽選は変わらず、短時間の払出率は目標と一致しない場合があります。目標0%ではスロット当選を停止します。適用時はJACKPOTの現在枚数を初期枚数へ更新します。", 17, new Color(.78f, .82f, .9f));
         explanation.textWrappingMode = TextWrappingModes.Normal;
         ui.feedbackText = Label("Feedback", content, new Vector2(.04f, .082f), new Vector2(.96f, .14f), "", 17, Color.white);
@@ -89,6 +93,19 @@ public static class MedalArcadeSettingsBuilder
         button.targetGraphic = rect.GetComponent<Image>();
         var text = Label("Label", rect, new Vector2(.02f, .02f), new Vector2(.98f, .98f), value, 23, Color.white);
         text.alignment = TextAlignmentOptions.Center; return button;
+    }
+    private static Toggle LotteryStatusToggle(Transform parent, bool isOn)
+    {
+        var row = Panel("ShowLotteryStatus", parent, new Vector2(.04f, .268f), new Vector2(.96f, .313f), Color.clear);
+        var toggle = row.gameObject.AddComponent<Toggle>();
+        var box = Panel("Checkbox", row, new Vector2(0, .5f), new Vector2(0, .5f), new Color(.14f, .2f, .3f));
+        box.sizeDelta = new Vector2(30, 30); box.anchoredPosition = new Vector2(15, 0);
+        var mark = Panel("Checkmark", box, new Vector2(.19f, .19f), new Vector2(.81f, .81f), new Color(.4f, 1, .7f));
+        mark.GetComponent<Image>().raycastTarget = false;
+        toggle.targetGraphic = box.GetComponent<Image>(); toggle.graphic = mark.GetComponent<Image>();
+        toggle.SetIsOnWithoutNotify(isOn);
+        Label("Label", row, new Vector2(.055f, 0), Vector2.one, "抽選案内を表示", 22, Color.white);
+        return toggle;
     }
     private static TMP_InputField Field(string name, Transform parent, Vector2 min, Vector2 max, string title, Color? labelColor = null)
     {

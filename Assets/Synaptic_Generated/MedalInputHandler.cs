@@ -3,7 +3,8 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
-/// <summary>Supports Space and mouse holds; UI presses remain UI-only.</summary>
+/// <summary>Drops medals at the pointed playfield position; UI presses remain UI-only.</summary>
+[DefaultExecutionOrder(-100)]
 public class MedalInputHandler : MonoBehaviour
 {
     public MedalPusherGame game;
@@ -20,30 +21,41 @@ public class MedalInputHandler : MonoBehaviour
         if (game == null) return;
         if (game.SettingsOpen) { mouseHoldAllowed = false; game.StopThrowing(); return; }
         Keyboard keyboard = Keyboard.current;
-        if (keyboard != null)
-        {
-            if (keyboard.digit1Key.wasPressedThisFrame) game.SelectInlet(0);
-            if (keyboard.digit2Key.wasPressedThisFrame) game.SelectInlet(1);
-            if (keyboard.digit3Key.wasPressedThisFrame) game.SelectInlet(2);
-            if (keyboard.aKey.wasPressedThisFrame || keyboard.leftArrowKey.wasPressedThisFrame) game.SelectInlet(game.selectedInlet - 1);
-            if (keyboard.dKey.wasPressedThisFrame || keyboard.rightArrowKey.wasPressedThisFrame) game.SelectInlet(game.selectedInlet + 1);
-        }
         Mouse mouse = Mouse.current;
         if (mouse != null && mouse.leftButton.wasPressedThisFrame)
-            mouseHoldAllowed = !IsPointerOverUI(mouse);
+        {
+            mouseHoldAllowed = TryAimAtScreenPosition(mouse.position.ReadValue());
+            if (mouseHoldAllowed) TryInsertAtScreenPosition(mouse.position.ReadValue());
+        }
         if (mouse == null || !mouse.leftButton.isPressed) mouseHoldAllowed = false;
-        bool keyboardHeld = Keyboard.current != null && Keyboard.current.spaceKey.isPressed;
-        bool mouseHeld = mouse != null && mouse.leftButton.isPressed && mouseHoldAllowed;
+        bool keyboardHeld = keyboard != null && keyboard.spaceKey.isPressed;
+        bool mouseHeld = mouse != null && mouse.leftButton.isPressed && mouseHoldAllowed
+            && TryAimAtScreenPosition(mouse.position.ReadValue());
         if (keyboardHeld || mouseHeld) game.StartThrowing();
         else game.StopThrowing();
     }
 
-    private bool IsPointerOverUI(Mouse mouse)
+    public bool TryAimAtScreenPosition(Vector2 screenPosition)
+    {
+        if (game == null) game = FindFirstObjectByType<MedalPusherGame>();
+        return game != null && !game.SettingsOpen && !IsPointerOverUI(screenPosition)
+            && game.TrySetMedalDropTarget(Camera.main, screenPosition);
+    }
+
+    public bool TryInsertAtScreenPosition(Vector2 screenPosition)
+    {
+        if (!TryAimAtScreenPosition(screenPosition)) return false;
+        long before = game.TotalPaidMedals;
+        game.ThrowSingleMedal();
+        return game.TotalPaidMedals > before;
+    }
+
+    private bool IsPointerOverUI(Vector2 screenPosition)
     {
         EventSystem system = EventSystem.current;
         if (system == null) return false;
         // Use current position to avoid EventSystem Update ordering delays.
-        PointerEventData pointer = new PointerEventData(system) { position = mouse.position.ReadValue() };
+        PointerEventData pointer = new PointerEventData(system) { position = screenPosition };
         uiHits.Clear();
         system.RaycastAll(pointer, uiHits);
         foreach (RaycastResult hit in uiHits)
